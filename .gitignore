@@ -1,0 +1,14 @@
+# dependencies and builds
+node_modules/
+dist/
+dist-dev/
+tts/.venv/
+tts/models/
+
+# live data: players, carvings, officer keys and the Freesia token never go to git
+data/
+data-dev/
+
+# scratch, logs, test photos
+.tmp/
+*.log

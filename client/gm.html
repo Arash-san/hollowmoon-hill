@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Master · Hollowmoon Hill</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="%CSS%">
+</head>
+<body class="officer">
+<header class="bar"><h1>🎃 Game Master</h1><span class="sub">Hollowmoon Hill · officers only</span><span class="spacer"></span><a class="pill link" id="treats-link" href="#">🍬 Treat table</a><span id="status" class="pill">…</span></header>
+<main class="gm">
+  <section class="card">
+    <h2>⚡ Start an event now</h2>
+    <p class="hint">Everyone in the game sees it, and the room speaker reads it out loud.</p>
+    <div id="events" class="gm-events"></div>
+  </section>
+  <section class="card">
+    <h2>⏰ Schedule an event</h2>
+    <p class="hint">Players get a 1 minute warning, then it starts by itself.</p>
+    <div class="gm-row"><select id="sched-kind"></select><input id="sched-time" type="time"><span class="or">or in</span><select id="sched-in"><option value="">…</option><option value="5">5 min</option><option value="10">10 min</option><option value="20">20 min</option><option value="40">40 min</option><option value="60">60 min</option></select><button id="sched-add" class="btn orange">Schedule</button></div>
+    <ul id="schedule" class="gm-list"></ul>
+  </section>
+  <section class="card">
+    <h2>📣 Announce</h2>
+    <div class="gm-row"><input id="announce" type="text" placeholder="e.g. Pizza is here! Boss fight in 10 minutes!"><button id="send" class="btn orange">Announce</button></div>
+  </section>
+  <section class="card wide">
+    <h2>👥 Players online</h2>
+    <p class="hint">Someone being annoying? Slow them down, keep them out of the boss and group games, or mute them, for a few minutes. No kicking needed.</p>
+    <div class="gm-row"><input id="search" type="text" placeholder="Find a player by name or code"><label class="mins">for <select id="minutes"><option>2</option><option selected>5</option><option>10</option><option>20</option></select> min</label></div>
+    <table><thead><tr><th>Player</th><th>Code</th><th>Quests</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  </section>
+</main>
+<script type="module" src="%JS%"></script>
+</body>
+</html>

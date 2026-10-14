@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treat Table · Hollowmoon Hill</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="%CSS%">
+</head>
+<body class="officer">
+<header class="bar"><h1>🍬 Treat Table</h1><span class="sub">Hollowmoon Hill · officers only</span><span class="spacer"></span><span id="status" class="pill">…</span></header>
+<main class="admin">
+  <div class="stats" id="stats"></div>
+  <div class="card">
+    <input id="search" placeholder="Type the ticket code from the student's screen (or their name)" autocomplete="off">
+  </div>
+  <div class="card"><table><thead><tr><th>Student</th><th>Code</th><th>Quests</th><th>Candy</th><th>Tickets earned</th><th>Treats given</th><th>Waiting</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="card announce"><input id="announce" type="text" placeholder="📣 Announce to everyone in the game (e.g. Boss fight at 7:30! Pizza is here!)"><button id="send" class="btn orange">Announce</button></div>
+</main>
+<script type="module" src="%JS%"></script>
+</body>
+</html>

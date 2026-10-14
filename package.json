@@ -1,0 +1,1 @@
+{"type":"module","private":true,"dependencies":{"@fontsource/creepster":"^5.3.0","@fontsource/fredoka":"^5.3.0","esbuild":"^0.28.2","puppeteer-core":"^25.13.0","sharp":"^0.35.5","three":"^0.186.1","ws":"^8.22.0"}}
