@@ -63,7 +63,9 @@ export class Input {
     if (down) {
       if (!this.keys.has(k)) {
         if (k === ' ') this.fire('jump');
-        if (k === 'e' || k === 'f') this.fire('interact');
+        if (k === 'e') this.fire('interact');
+        if (k === 'f') this.fire('power');
+        if (k === 'l') this.fire('lantern');
         if (k === 'q' || k === 'g') this.fire('emotes');
         if (k === 'enter' || k === 't') {
           e.preventDefault();

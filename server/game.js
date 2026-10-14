@@ -14,6 +14,8 @@ import { npcReply, validateOffer, isDiscount, RIDDLES } from './npc.js';
 import { Boss } from './boss.js';
 import { CLUES, CLUES_NEEDED, FINALE_SPEECH } from '../shared/story.js';
 import { speak, sentences, ttsEnabled } from './tts.js';
+import { insideIsland, ISLAND_MAX } from '../shared/terrain.js';
+import { CLASSES, classFromCostume, MANOR_DOOR, ROOM, ROOM_SPAWN, ROOM_MIN, ROOM_MAX, PLATES, ROOM_EXIT, TEAM_COLORS, CONTEST_SECONDS, STENCILS } from '../shared/features.js';
 
 const QUEST_IDS = new Set(QUESTS.map((q) => q.id));
 const EMOTE_IDS = new Set(EMOTES.map((e) => e.id));
@@ -51,6 +53,10 @@ export class Game {
     this.wispGen = Array.from({ length: WISP_SLOTS }, (_, i) => i * 1000 + Math.floor(Math.random() * 900));
     this.boss = new Boss(this, 'king');
     this.finale = new Boss(this, 'mayor');
+    this.bear = new Boss(this, 'bear');
+    this.rooms = new Map(); // Gloom Manor instances
+    this.nextRoom = 1;
+    this.contest = { active: false };
     this.spiders = new Map();
     this.nextSpider = 1;
     for (let i = 0; i < SPIDER_COUNT; i++) this.spawnSpider();
@@ -86,7 +92,7 @@ export class Game {
 
   publicPlayer(s) {
     const p = s.player;
-    return { id: s.sid, name: p.name, avatar: p.avatar, title: p.avatar.title, photo: !!p.photo, x: s.x, y: s.y, z: s.z, ry: s.ry, likes: p.likes || 0, fx: s.fx || null, down: !!s.down, carving: p.carving || null };
+    return { id: s.sid, name: p.name, avatar: p.avatar, title: p.avatar.title, photo: !!p.photo, x: s.x, y: s.y, z: s.z, ry: s.ry, likes: p.likes || 0, fx: s.fx || null, down: !!s.down, carving: p.carving || null, cls: p.cls || null, color: this.colorOf(s), room: s.room || 0 };
   }
 
   privateState(p) {
@@ -96,7 +102,7 @@ export class Game {
       name: p.name, code: p.code, avatar: p.avatar, photo: !!p.photo, candy: p.candy, pumpkins: p.pumpkins, wisps: p.wisps, quests,
       tickets: p.tickets, redeemed: p.redeemed, likes: p.likes || 0, debt: p.debt || null, carving: p.carving || null, ticketCode: p.ticketCode,
       mod: this.activeMods(p),
-      items: p.items || {}, clues: p.clues || [],
+      items: p.items || {}, clues: p.clues || [], cls: p.cls || null,
     };
   }
   sendMe(s) {
@@ -125,6 +131,7 @@ export class Game {
   }
 
   disconnect(s) {
+    if (s.room) this.leaveRoom(s, false);
     this.sessions.delete(s.sid);
     if (s.player) {
       s.player.lastSeen = now();
@@ -159,8 +166,9 @@ export class Game {
     for (const other of this.sessions.values()) if (other !== s && other.pid === pid) other.ws.close(4000, 'opened elsewhere');
     s.pid = pid;
     s.player = p;
-    s.hp = MAX_HP;
     s.down = 0;
+    s.room = 0;
+    s.hp = this.maxHp(s);
     p.items ||= { revive: 0, fire: 0 };
     p.clues ||= [];
     s.x = SPAWN.x + rand(-3, 3);
@@ -173,9 +181,11 @@ export class Game {
         pumpkins: [...this.pumpkins.values()], candies: [...this.candies.values()], wisps: this.wispGen,
         carvings: this.state.carvings.map((c) => this.carvingPublic(c)), boss: this.boss.public(), minions: ['fight', 'shield', 'stunned'].includes(this.boss.state) ? [...this.boss.minions.values()] : [],
         finale: this.finale.public(), finaleMinions: ['fight', 'stunned'].includes(this.finale.state) ? [...this.finale.minions.values()] : [],
+        bear: this.bear.public(), bearMinions: ['fight', 'stunned'].includes(this.bear.state) ? [...this.bear.minions.values()] : [],
+        contest: this.contest.active ? { stencil: this.contest.stencil, left: (this.contest.until - now()) / 1000 } : null,
       },
     });
-    this.send(s, { t: 'hp', hp: s.hp, max: MAX_HP });
+    this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s), color: this.colorOf(s) });
     this.broadcast({ t: 'join', p: this.publicPlayer(s) }, s);
   }
 
@@ -193,7 +203,7 @@ export class Game {
       case 'move': {
         const x = Number(m.x), y = Number(m.y), z = Number(m.z);
         if (![x, y, z].every(Number.isFinite)) return;
-        if (x * x + z * z > (WORLD_RADIUS + 5) ** 2) return;
+        if (!s.room && x * x + z * z > (ISLAND_MAX + 5) ** 2) return;
         s.x = x;
         s.y = Math.max(-2, Math.min(20, y));
         s.z = z;
@@ -243,7 +253,19 @@ export class Game {
       case 'hit':
         if (this.modded(p, 'block') || s.down) return;
         if (m.kind === 'spider') return this.hitSpider(s, Number(m.id));
-        return (m.b === 'mayor' ? this.finale : this.boss).hit(s, m.kind === 'minion' ? 'minion' : 'boss', Number(m.id));
+        return (m.b === 'mayor' ? this.finale : m.b === 'bear' ? this.bear : this.boss).hit(s, m.kind === 'minion' ? 'minion' : 'boss', Number(m.id));
+      case 'pickClass':
+        return this.pickClass(s, String(m.cls));
+      case 'special':
+        return this.special(s, m);
+      case 'pvp':
+        return this.pvp(s, Number(m.id));
+      case 'enterRoom':
+        return this.enterRoom(s);
+      case 'leaveRoom':
+        return this.leaveRoom(s, true);
+      case 'roomStart':
+        return this.roomStart(s);
       case 'hurt':
         return this.hurt(s, HURT[m.src] || 0, m.src);
       case 'revive':
@@ -325,6 +347,7 @@ export class Game {
 
   bossTicket(s, id = 'king') {
     const p = s.player;
+    if (id === 'bear') return; // the bear pays its quest reward, not a ticket
     const flag = id === 'mayor' ? 'finaleTicket' : 'bossTicket';
     if (!BOSS_TICKET || p[flag]) return;
     p[flag] = true;
@@ -354,10 +377,10 @@ export class Game {
     // anywhere on the island, away from the edge and the lake
     let x, z;
     for (;;) {
-      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (WORLD_RADIUS - 12);
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 80;
       x = Math.cos(a) * r;
       z = Math.sin(a) * r;
-      if (dist2({ x, z }, ZONES.lake) > (ZONES.lake.r + 2) ** 2) break;
+      if (insideIsland(x, z, 8) && dist2({ x, z }, ZONES.lake) > (ZONES.lake.r + 2) ** 2) break;
     }
     const item = { id: this.nextItem++, x: +x.toFixed(2), z: +z.toFixed(2), k: Math.floor(Math.random() * 4) };
     this.candies.set(item.id, item);
@@ -604,7 +627,8 @@ export class Game {
 
   carve(s, m) {
     const p = s.player;
-    if (dist2(s, CARVE_TABLE) > 64) return;
+    const contest = m.contest && this.contest.active;
+    if (!contest && dist2(s, CARVE_TABLE) > 64) return;
     const data = String(m.png || '');
     if (!data.startsWith('data:image/png;base64,') || data.length > 400000) return this.toast(s, 'That carving is too big. Try fewer strokes!');
     let c = this.state.carvings.find((x) => x.pid === p.pid);
@@ -626,8 +650,45 @@ export class Game {
     fs.writeFileSync(path.join(DATA, 'carvings', `${c.id}.png`), Buffer.from(data.slice(22), 'base64'));
     p.carving = c.id;
     this.completeQuest(s, 'carve');
+    if (contest) {
+      const score = Math.max(0, Math.min(100, Math.round(Number(m.score) || 0)));
+      const prev = this.contest.scores.get(p.pid);
+      if (!prev || score > prev.score) this.contest.scores.set(p.pid, { name: p.name, score, carving: c.id });
+      this.toast(s, `🔪 Your carving scored ${score}%! Results when the timer runs out.`, 'good');
+    }
     this.broadcast({ t: 'carving', item: this.carvingPublic(c) });
     this.dirty();
+  }
+
+  // A carving from a photographed paper drawing (the booth). Same storage as the carving table.
+  setCarvingImage(pid, png) {
+    const p = this.state.players[pid];
+    if (!p) return null;
+    let c = this.state.carvings.find((x) => x.pid === pid);
+    if (!c) {
+      const used = new Set(this.state.carvings.map((x) => x.slot));
+      let slot = 0;
+      while (used.has(slot) && slot < CARVING_SLOTS) slot++;
+      if (slot >= CARVING_SLOTS) {
+        const oldest = this.state.carvings.sort((a, b) => a.at - b.at)[0];
+        slot = oldest.slot;
+        this.state.carvings = this.state.carvings.filter((x) => x !== oldest);
+      }
+      c = { id: this.state.nextCarving++, pid, name: p.name, slot, likes: [], at: now(), v: 0 };
+      this.state.carvings.push(c);
+    }
+    c.v = (c.v || 0) + 1;
+    c.at = now();
+    fs.writeFileSync(path.join(DATA, 'carvings', `${c.id}.png`), png);
+    p.carving = c.id;
+    this.broadcast({ t: 'carving', item: this.carvingPublic(c) });
+    for (const s of this.online()) if (s.pid === pid) {
+      this.completeQuest(s, 'carve');
+      this.toast(s, '🎃 Your drawing is now your glowing pumpkin! It shines in the plaza gallery, and it is the pumpkin you turn into.', 'win');
+      this.sendMe(s);
+    }
+    this.dirty();
+    return c;
   }
 
   likePumpkin(s, m) {
@@ -641,9 +702,14 @@ export class Game {
   }
 
   // ---------- photo booth ----------
-  setPhotoAvatar(pid, avatar) {
+  setPhotoAvatar(pid, avatar, costumeWords = '') {
     const p = this.state.players[pid];
     if (!p) return null;
+    const cls = classFromCostume(costumeWords);
+    if (cls && !p.clsPicked) {
+      p.cls = cls;
+      for (const s of this.online()) if (s.pid === pid) this.toast(s, `🔮 The booth spirits see your costume: you are a ${CLASSES[cls].name}! Power: ${CLASSES[cls].power}.`, 'win');
+    }
     p.avatar = avatar;
     p.photo = true;
     this.dirty();
@@ -661,6 +727,9 @@ export class Game {
     const t = now();
     this.boss.tick(t);
     this.finale.tick(t);
+    this.bear.tick(t);
+    this.tickRooms(t);
+    this.tickContest(t);
     const players = this.online();
     // positions to everyone at 10 Hz
     if (players.length) {
@@ -718,6 +787,13 @@ export class Game {
         }
       }
       this.broadcast({ t: 'event', kind: 'ritual', names });
+      const moon = filled.map((sid) => this.sessions.get(sid)).find((x) => x?.player?.items?.moon);
+      if (moon && this.bear.state === 'idle') {
+        moon.player.items.moon--;
+        this.sendMe(moon);
+        this.bear.forceStart();
+        this.broadcast({ t: 'toast', text: `🐻 ${moon.player.name} poured a Moon Potion on the runes… THE PUMPKIN BEAR AWAKENS at the Summoning Circle!`, kind: 'boss' });
+      }
       this.broadcast({ t: 'toast', text: `🔮 ${names.join(', ')} completed the Summoning! The Great Pumpkin Spirit rises!`, kind: 'win' });
     }
   }
@@ -801,6 +877,7 @@ export class Game {
       setTimeout(() => this.spiderSwarm(ZONES.plaza, 6), 20000);
     }
     if (kind === 'spiders') this.spiderSwarm(ZONES.graveyard, 10);
+    if (kind === 'carving' && !this.startContest()) return false;
     if (kind === 'party') {
       const t = now();
       this.party.forced = t + 25000;
@@ -859,7 +936,7 @@ export class Game {
     if (t - (s.lastHurt || 0) < 600) return;
     s.lastHurt = t;
     s.hp = Math.max(0, s.hp - n);
-    this.send(s, { t: 'hp', hp: s.hp, max: MAX_HP, hit: n, src });
+    this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s), hit: n, src });
     if (s.hp <= 0) this.knockDown(s);
   }
 
@@ -874,7 +951,7 @@ export class Game {
     s.down = 0;
     s.hp = hp;
     this.broadcast({ t: 'down', id: s.sid, on: false, by });
-    this.send(s, { t: 'hp', hp: s.hp, max: MAX_HP });
+    this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s) });
   }
 
   revive(s, targetSid) {
@@ -912,9 +989,9 @@ export class Game {
       if (s.down && t > s.down) {
         this.getUp(s, 50);
         this.toast(s, '🌕 The moonlight lifted the pumpkin curse. Back on your feet!', 'good');
-      } else if (!s.down && s.hp < MAX_HP && t - (s.lastHurt || 0) > 8000) {
-        s.hp = Math.min(MAX_HP, s.hp + 4);
-        this.send(s, { t: 'hp', hp: s.hp, max: MAX_HP });
+      } else if (!s.down && s.hp < this.maxHp(s) && t - (s.lastHurt || 0) > 8000) {
+        s.hp = Math.min(this.maxHp(s), s.hp + 4);
+        this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s) });
       }
     }
   }
@@ -946,7 +1023,7 @@ export class Game {
         // chase the nearest player in reach who is not a pumpkin and not somewhere safe
         let best = null, bd = 11 * 11;
         for (const s of players) {
-          if (s.down || s.y > 2.5 || this.modded(s.player, 'block')) continue;
+          if (s.down || s.room || this.modded(s.player, 'block')) continue;
           if (!sp.swarm && !finale && SAFE.some((z) => dist2(s, z) < z.r * z.r)) continue;
           const d = dist2(sp, s);
           if (d < bd) (bd = d), (best = s);
@@ -1001,6 +1078,226 @@ export class Game {
     this.addCandy(s, back, sp.loot ? 'got the candy back' : 'spider');
     this.sendMe(s);
     if (!sp.swarm) setTimeout(() => this.spawnSpider(sp.home), 25000);
+  }
+
+  // ---------- classes ----------
+  maxHp(s) {
+    return CLASSES[s.player?.cls]?.hp || MAX_HP;
+  }
+
+  pickClass(s, cls) {
+    const p = s.player;
+    if (!CLASSES[cls]) return;
+    // the first pick is free; changing later needs a word with Madame Hex
+    if (p.clsPicked && dist2(s, NPCS.hex) > 144) return this.toast(s, 'Madame Hex can change your class at her cottage.');
+    p.cls = cls;
+    p.clsPicked = true;
+    s.hp = Math.min(s.hp, this.maxHp(s));
+    if (!s.down) s.hp = this.maxHp(s);
+    this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s) });
+    this.broadcast({ t: 'cls', id: s.sid, cls });
+    this.toast(s, `✨ You are a ${CLASSES[cls].name}! Your power: ${CLASSES[cls].power} (button or F).`, 'win');
+    this.dirty();
+    this.sendMe(s);
+  }
+
+  special(s, m) {
+    const c = CLASSES[s.player.cls];
+    const t = now();
+    if (!c || s.down || this.modded(s.player, 'block')) return;
+    if (t - (s.specialAt || 0) < c.cd * 1000 - 300) return;
+    s.specialAt = t;
+    if (s.player.cls === 'witch') {
+      // a big fireball at the target the client picked (a spider, a boss or a minion)
+      if (m.kind === 'spider') this.hitSpider(s, Number(m.id));
+      else if (m.kind) {
+        const b = m.b === 'mayor' ? this.finale : m.b === 'bear' ? this.bear : this.boss;
+        b.lastHit?.delete?.(s.sid);
+        b.hit(s, m.kind === 'minion' ? 'minion' : 'boss', Number(m.id), 3);
+      }
+    } else if (s.player.cls === 'vampire') {
+      s.hp = Math.min(this.maxHp(s), s.hp + 15);
+      this.send(s, { t: 'hp', hp: s.hp, max: this.maxHp(s) });
+    } else if (s.player.cls === 'zombie') {
+      // the groan scares spiders and minions close by
+      for (const sp of [...this.spiders.values()]) if (dist2(s, sp) < 49) this.hitSpider(s, sp.id), (s.lastSpiderHit = 0);
+      for (const b of [this.boss, this.finale, this.bear]) {
+        for (const [id, mi] of b.minions) if (dist2(s, mi) < 36) b.minions.delete(id), this.broadcast({ t: 'bossAtk', b: b.id, kind: 'minionDie', id, by: s.sid });
+      }
+    }
+    this.broadcast({ t: 'power', id: s.sid, cls: s.player.cls });
+  }
+
+  // ---------- arena duels: only in the Moonlit Courtyard, and only while the Gourd King sleeps ----------
+  inDuelZone(s) {
+    const A = ZONES.arena;
+    return !s.room && (s.x - A.x) ** 2 + (s.z - A.z) ** 2 < A.r * A.r && this.boss.state === 'idle';
+  }
+
+  pvp(s, targetSid) {
+    const tgt = this.sessions.get(targetSid);
+    const t = now();
+    if (!tgt?.player || tgt === s || s.down || tgt.down || !this.inDuelZone(s) || !this.inDuelZone(tgt)) return;
+    if (dist2(s, tgt) > 14 * 14 || t - (s.lastPvp || 0) < 450 || this.modded(s.player, 'block')) return;
+    s.lastPvp = t;
+    tgt.lastHurt = 0;
+    this.hurt(tgt, s.player.items?.fire ? 15 : 10, 'pvp');
+    this.broadcast({ t: 'pvpHit', by: s.sid, id: tgt.sid });
+    if (tgt.down) {
+      this.addCandy(s, 5, 'duel win');
+      this.broadcast({ t: 'toast', text: `⚔️ ${s.player.name} won a duel against ${tgt.player.name}!`, kind: 'info' });
+    }
+  }
+
+  // ---------- team colours ----------
+  colorOf(s) {
+    const r = s.room && this.rooms.get(s.room);
+    if (r) return r.color;
+    let h = 0;
+    for (const ch of String(s.pid || s.sid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return TEAM_COLORS[h % TEAM_COLORS.length];
+  }
+
+  // ---------- Gloom Manor: team rooms for 2-4 players ----------
+  roomView(r) {
+    return { t: 'room', id: r.id, state: r.state, step: r.step, color: r.color, members: [...r.members].map((sid) => ({ id: sid, name: this.sessions.get(sid)?.player?.name || '?' })), min: ROOM_MIN, max: ROOM_MAX };
+  }
+  roomSend(r, msg) {
+    for (const sid of r.members) {
+      const s = this.sessions.get(sid);
+      if (s) this.send(s, msg);
+    }
+  }
+
+  enterRoom(s) {
+    if (s.room || s.down) return;
+    if (dist2(s, MANOR_DOOR) > 64) return this.toast(s, 'Walk up to the door of Gloom Manor.');
+    // join a team that is still gathering (friends who walk in together end up in the same room)
+    let r = [...this.rooms.values()].find((x) => x.state === 'waiting' && x.members.size < ROOM_MAX);
+    if (!r) {
+      r = { id: this.nextRoom++, members: new Set(), state: 'waiting', step: 0, code: [], hints: new Map(), created: now(), color: TEAM_COLORS[this.nextRoom % TEAM_COLORS.length] };
+      this.rooms.set(r.id, r);
+    }
+    r.members.add(s.sid);
+    s.room = r.id;
+    s.onPlate = null;
+    this.send(s, { t: 'teleport', x: ROOM_SPAWN.x + rand(-2, 2), z: ROOM_SPAWN.z + rand(-1, 1), room: r.id });
+    this.broadcast({ t: 'inRoom', id: s.sid, room: r.id, color: r.color });
+    this.roomSend(r, this.roomView(r));
+    this.toast(s, r.members.size < ROOM_MIN ? '🏚️ Welcome to Gloom Manor! Wait for at least one friend to join, then start the Spirit Lock.' : '🏚️ Your team is here! Press Start when everyone is in.', 'announce');
+    if (r.members.size >= ROOM_MAX) this.roomStart(s);
+  }
+
+  roomStart(s) {
+    const r = this.rooms.get(s.room);
+    if (!r || r.state !== 'waiting') return;
+    if (r.members.size < ROOM_MIN) return this.toast(s, `The Spirit Lock needs at least ${ROOM_MIN} people. Bring a friend!`);
+    r.state = 'playing';
+    r.step = 0;
+    r.code = Array.from({ length: 4 }, () => PLATES[Math.floor(Math.random() * PLATES.length)].id);
+    // split the code between the players, so nobody can solve it alone
+    const members = [...r.members];
+    r.hints = new Map(members.map((sid) => [sid, []]));
+    r.code.forEach((col, i) => r.hints.get(members[i % members.length]).push({ i, color: col }));
+    for (const sid of members) {
+      const m = this.sessions.get(sid);
+      if (m) this.send(m, { t: 'roomHints', hints: r.hints.get(sid) });
+    }
+    this.roomSend(r, this.roomView(r));
+    this.roomSend(r, { t: 'toast', text: '🔒 The Spirit Lock wakes up! Each of you sees part of the colour code. Talk, then step on the plates in the right order.', kind: 'announce' });
+  }
+
+  leaveRoom(s, teleport) {
+    const r = this.rooms.get(s.room);
+    s.room = 0;
+    if (teleport) this.send(s, { t: 'teleport', x: MANOR_DOOR.x + rand(-2, 2), z: MANOR_DOOR.z + 4, room: 0 });
+    this.broadcast({ t: 'inRoom', id: s.sid, room: 0, color: this.colorOf(s) });
+    if (!r) return;
+    r.members.delete(s.sid);
+    if (!r.members.size) this.rooms.delete(r.id);
+    else this.roomSend(r, this.roomView(r));
+  }
+
+  tickRooms(t) {
+    for (const r of this.rooms.values()) {
+      if (r.state === 'waiting' && r.members.size >= ROOM_MIN && t - r.created > 45000) {
+        // nobody pressed start: go anyway
+        const any = this.sessions.get([...r.members][0]);
+        if (any) this.roomStart(any);
+      }
+      if (r.state !== 'playing') continue;
+      for (const sid of r.members) {
+        const s = this.sessions.get(sid);
+        if (!s) continue;
+        const plate = PLATES.find((p) => dist2(s, p) < p.r * p.r && s.y < 1.2);
+        if (!plate) {
+          s.onPlate = null;
+          continue;
+        }
+        if (s.onPlate === plate.id) continue;
+        s.onPlate = plate.id;
+        if (plate.id === r.code[r.step]) {
+          r.step++;
+          this.roomSend(r, { t: 'roomStep', step: r.step, plate: plate.id, ok: true });
+          if (r.step >= r.code.length) this.roomWin(r);
+        } else {
+          r.step = 0;
+          this.roomSend(r, { t: 'roomStep', step: 0, plate: plate.id, ok: false });
+          this.roomSend(r, { t: 'toast', text: '👻 Wrong plate! The spirits shriek and the lock resets. Start again from the first colour.', kind: 'boss' });
+        }
+      }
+    }
+  }
+
+  roomWin(r) {
+    r.state = 'done';
+    this.roomSend(r, this.roomView(r));
+    const names = [];
+    for (const sid of r.members) {
+      const s = this.sessions.get(sid);
+      if (!s) continue;
+      names.push(s.player.name);
+      this.completeQuest(s, 'manor');
+      this.addCandy(s, 15, 'spirit lock');
+      const items = (s.player.items ||= {});
+      items.moon = (items.moon || 0) + 1;
+      items.revive = Math.min(5, (items.revive || 0) + 1);
+      this.toast(s, '🌕 The lock opens! You found a MOON POTION (and a Revive Potion). Take it to the Summoning Circle with friends to wake the Pumpkin Bear!', 'win');
+      this.sendMe(s);
+    }
+    this.broadcast({ t: 'toast', text: `🏚️ ${names.join(', ')} cracked the Spirit Lock in Gloom Manor!`, kind: 'win' });
+    setTimeout(() => {
+      for (const sid of [...r.members]) {
+        const s = this.sessions.get(sid);
+        if (s) this.leaveRoom(s, true);
+      }
+    }, 7000);
+  }
+
+  // ---------- carving contest ----------
+  startContest() {
+    if (this.contest.active) return false;
+    const stencil = STENCILS[Math.floor(Math.random() * STENCILS.length)];
+    this.contest = { active: true, stencil, until: now() + (CONTEST_SECONDS + 20) * 1000, scores: new Map() };
+    this.broadcast({ t: 'contest', state: 'on', stencil, left: CONTEST_SECONDS + 20 });
+    return true;
+  }
+
+  tickContest(t) {
+    const c = this.contest;
+    if (!c.active || t < c.until) return;
+    c.active = false;
+    const ranked = [...c.scores.entries()].sort((a, b) => b[1].score - a[1].score);
+    const top = ranked.slice(0, 3).map(([pid, v]) => ({ name: v.name, score: v.score, carving: v.carving, pid }));
+    ranked.forEach(([pid, v], i) => {
+      const s = this.online().find((x) => x.pid === pid);
+      if (!s) return;
+      this.addCandy(s, i === 0 ? 30 : i < 3 ? 15 : 5, 'carving contest');
+      if (i === 0) this.giveTicket(s, 'for winning the carving contest');
+      this.sendMe(s);
+    });
+    this.broadcast({ t: 'contest', state: 'done', top: top.map(({ pid, ...rest }) => rest), count: ranked.length });
+    this.broadcast({ t: 'toast', text: top.length ? `🏆 Carving contest winner: ${top[0].name} with ${top[0].score}%!` : '🔪 The carving contest ended. Nobody carved this time!', kind: 'win' });
   }
 
   bossIdle(id) {

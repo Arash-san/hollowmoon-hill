@@ -91,12 +91,14 @@ export const QUESTS = [
   { id: 'clues', title: 'The Prophecy', hint: 'Find 4 clues about who threatens Hollowmoon Hill. Quests hide them!', goal: 4, reward: 40 },
   { id: 'ritual', title: 'The Summoning', hint: 'Stand on the glowing runes with other players at once.', group: true, reward: 40 },
   { id: 'dance', title: 'Monster Mash', hint: 'Dance on the dance floor with 2 or more players.', group: true, reward: 40 },
+  { id: 'manor', title: 'The Spirit Lock', hint: 'Take 1 to 3 friends into Gloom Manor (north) and crack the colour code together.', group: true, reward: 40 },
+  { id: 'bear', title: 'Bear Necessities', hint: 'Bring a Moon Potion (from Gloom Manor) to the Summoning Circle with friends, then defeat the Pumpkin Bear.', group: true, reward: 50 },
   { id: 'rescue', title: 'Pumpkin Rescue', hint: 'A friend turned into a pumpkin? Revive them with a Revive Potion (brew one at the cauldron).', group: true, reward: 30 },
   { id: 'boss', title: 'Topple the Gourd King', hint: 'Ring the bell in the Moonlit Courtyard and defeat the boss together.', group: true, reward: 60 },
   { id: 'finale', title: 'Save Hollowmoon Hill', hint: 'When the villain shows his true face, everyone fights him in Lantern Plaza!', group: true, reward: 80 },
 ];
 // Big picture icon for each quest (checklist cards, map pins).
-export const QUEST_ICON = { hello: '🎃', photo: '📸', harvest: '🌾', wisps: '🫙', potion: '🧪', candles: '🕯️', carve: '🔪', riddle: '👻', deal: '🤝', friend: '💜', clues: '🔍', ritual: '🔮', dance: '🪩', rescue: '🧪', boss: '👑', finale: '🎩' };
+export const QUEST_ICON = { hello: '🎃', photo: '📸', harvest: '🌾', wisps: '🫙', potion: '🧪', candles: '🕯️', carve: '🔪', riddle: '👻', deal: '🤝', friend: '💜', clues: '🔍', ritual: '🔮', dance: '🪩', rescue: '🧪', boss: '👑', finale: '🎩', manor: '🏚️', bear: '🐻' };
 export const TICKET_EVERY = 3; // quests per Treat Ticket
 export const BOSS_TICKET = true; // beating the boss gives one extra ticket
 export const MAX_TICKETS = 5; // real treats per student, so the treat table does not run dry
@@ -122,6 +124,7 @@ export const BOSS_BELL = { x: 9, z: -46 };
 // The two bosses. The finale is the story's plot twist: the friendly mayor was the villain all along.
 export const BOSSES = {
   king: { name: 'The Gourd King', place: 'Moonlit Courtyard', center: ZONES.arena, quest: 'boss', bell: true, shield: true, winText: 'The Gourd King is toppled!' },
+  bear: { name: 'The Pumpkin Bear', place: 'Summoning Circle', center: ZONES.circle, quest: 'bear', bell: false, shield: false, hpScale: 0.8, minionR: 4, minionDz: 0, winText: 'The Pumpkin Bear rolls over and falls asleep, full of candy!' },
   mayor: {
     name: 'Mayor Gourdon, the Pumpkin King', place: 'Lantern Plaza', center: { x: 0, z: 0, r: 15 }, quest: 'finale', bell: false, shield: false, hpScale: 1.3, minionR: 6, minionDz: 0,
     winText: 'Hollowmoon Hill is saved! Mayor Gourdon shrinks back into a tiny, sorry little pumpkin.',
@@ -185,6 +188,7 @@ export const QUICK_CHAT = ['Hi! 👋', 'Follow me!', 'Boss time! 🎃', 'Help me
 export const GM_EVENTS = {
   boss: { label: 'Wake the Gourd King', icon: '👑', say: 'The Gourd King is waking up! Everybody to the Moonlit Courtyard!' },
   party: { label: 'Monster Mash party', icon: '🪩', say: 'DJ Skelly is dropping the beat! Dance on the Monster Mash Floor for treats!' },
+  carving: { label: 'Pumpkin carving contest', icon: '🔪', say: 'Pumpkin carving contest! Everyone gets the same design. Carve it as close as you can in one minute!' },
   spiders: { label: 'Spider swarm', icon: '🕷️', say: 'Spiders are crawling out of the graveyard! Squash them before they steal your candy!' },
   finale: { label: "FINALE: the Mayor's betrayal", icon: '🎩', say: 'Something is wrong with Mayor Gourdon… Everybody to Lantern Plaza, NOW!' },
 };

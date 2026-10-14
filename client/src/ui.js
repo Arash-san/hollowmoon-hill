@@ -1,17 +1,20 @@
 // HUD and panels (plain DOM). The game calls these; they call back through `handlers`.
 import { VoiceTalk } from './voice.js';
+import { icon, richText, leadIcon, splitLead, stripEmoji, iconize, hydrateIcons, EMOJI_ICON } from './icons.js';
 import { PROPHECY, CLUES, CLUES_NEEDED } from '../../shared/story.js';
 import { QUESTS, TICKET_EVERY, MAX_TICKETS, EMOTES, QUICK_CHAT, NPCS, TICKET_CANDY_PRICE, QUEST_ICON } from '../../shared/world.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-export const NPC_ICON = { mayor: '🎃', hex: '🧙‍♀️', count: '🧛', bones: '💀', hayley: '🌾', wisp: '👻', dj: '🎧' };
+// each NPC's icon (icons.js names)
+export const NPC_ICON = { mayor: 'mayor', hex: 'hex', count: 'count', bones: 'bones', hayley: 'hayley', wisp: 'wisp', dj: 'dj' };
+const TOAST_ICON = { good: 'check', boss: 'skull', win: 'star', heart: 'heart', announce: 'speaker', info: 'sparkle' };
 const NPC_SUB = { mayor: 'Mayor of Hollowmoon Hill', hex: 'Potion maker · Haggle for potions!', count: 'Banker of the Night · Borrow candy', bones: 'Trader · Swap costumes and pets', hayley: 'Pumpkin farmer', wisp: 'Riddle master', dj: 'Party starter' };
 const NPC_CHIPS = {
   mayor: ['What should I do?', 'How do I get real treats?', 'Tell me a pumpkin pun!', 'Any candy for a hard worker?'],
   hex: ['What potions do you sell?', 'Could I get a discount, dearie?', 'Tell me some gossip!', 'I brought wisps from the woods!'],
-  count: ['Could I borrow some candy?', 'Your cape is magnificent!', 'What are your terms?', 'Lower interest, please? 🥺'],
+  count: ['Could I borrow some candy?', 'Your cape is magnificent!', 'What are your terms?', 'Lower interest, please?'],
   bones: ['Whatcha selling?', 'Want to buy my pumpkins?', 'Swap my pumpkins for a pet?', "That's too expensive!"],
   hayley: ['How do I harvest?', 'Why are you scared of crows?', 'Tell me about the festival'],
   wisp: ['Give me a riddle!', 'Can I have a hint?', 'Teach me something about AI'],
@@ -25,6 +28,7 @@ export class UI {
     this.toastCount = 0;
     // closed by default; it remembers if a player opens it
     this.questsOpen = localStorage.getItem('hh-quests') === 'open';
+    hydrateIcons();
     if (!matchMedia('(pointer: coarse)').matches) document.body.classList.add('desktop');
     $('#modal .x').onclick = () => this.closeModal();
     $('#modal').addEventListener('pointerdown', (e) => {
@@ -138,7 +142,7 @@ export class UI {
     if (prev && me.tickets > prev.tickets) this.bump('#ticket-pill');
     const banner = $('#booth-banner');
     if (!me.photo) {
-      banner.innerHTML = `📸 Get your 3D look at the <u>Photo Booth</u> (pink tent in the plaza)! Your code: <b>${esc(me.code)}</b>`;
+      banner.innerHTML = `${icon('camera')}<span>Get your 3D look at the <u>Photo Booth</u>, the pink tent in the plaza!</span><span class="code">Your code <b>${esc(me.code)}</b></span>`;
       banner.classList.remove('hidden');
     } else banner.classList.add('hidden');
     this.renderQuests(me);
@@ -158,25 +162,25 @@ export class UI {
     const inRow = done % TICKET_EVERY;
     const maxed = me.tickets >= MAX_TICKETS;
     const meter = maxed
-      ? `<div class="ticket-meter full">🎟️ All ${MAX_TICKETS} Treat Tickets earned!</div>`
-      : `<div class="ticket-meter"><span>🎟️</span><span class="slots">${Array.from({ length: TICKET_EVERY }, (_, i) => `<i class="${i < inRow ? 'on' : ''}"></i>`).join('')}</span><span>${TICKET_EVERY - inRow} more for a Treat Ticket</span></div>`;
+      ? `<div class="ticket-meter full">${icon('ticket')} All ${MAX_TICKETS} Treat Tickets earned!</div>`
+      : `<div class="ticket-meter"><span>${icon('ticket')}</span><span class="slots">${Array.from({ length: TICKET_EVERY }, (_, i) => `<i class="${i < inRow ? 'on' : ''}"></i>`).join('')}</span><span>${TICKET_EVERY - inRow} more for a Treat Ticket</span></div>`;
     const card = (q) => {
       const st = me.quests[q.id] || {};
       const n = Math.min(st.n || 0, q.goal || 1);
       const bar = q.goal && !st.done ? `<div class="qbar"><i style="width:${(100 * n) / q.goal}%"></i></div>` : '';
       const right = st.done ? '<span class="qr ok">✓</span>' : `<span class="qr">${q.goal ? `${n}/${q.goal}` : `+${q.reward}`}<small>${q.goal ? '' : '🍬'}</small></span>`;
       return `<button class="qcard ${st.done ? 'done' : ''} ${q.id === tracked && !st.done ? 'tracked' : ''} ${q.group ? 'group' : ''}" data-q="${q.id}">
-        <span class="qi">${QUEST_ICON[q.id] || '⭐'}</span>
-        <span class="qb"><span class="t">${esc(q.title)}${q.group ? ' <em>👥 group</em>' : ''}</span><span class="h">${esc(q.hint)}</span>${bar}</span>${right}</button>`;
+        <span class="qi">${icon(q.id) || icon('star')}</span>
+        <span class="qb"><span class="t">${q.id === tracked && !st.done ? icon('pin', 'inline') : ''}${esc(q.title)}${q.group ? ` <em>${icon('users', 'inline')}group</em>` : ''}</span><span class="h">${esc(q.hint)}</span>${bar}</span>${right}</button>`;
     };
     const open = QUESTS.filter((q) => !me.quests[q.id]?.done);
     const finished = QUESTS.filter((q) => me.quests[q.id]?.done);
     this.questHtml = () => `<p class="q-tip">Tap a quest to see where it is on the map.</p><div class="qgrid">${[...open, ...finished].map(card).join('')}</div>${meter}`;
     // closed: just the quest you are on (tracked, else the next open one)
     const now = open.find((q) => q.id === tracked) || open[0];
-    $('#quest-panel').innerHTML = `<h3><span>📜 Checklist <b>${done}/${QUESTS.length}</b></span><span class="chev">▼</span></h3>
+    $('#quest-panel').innerHTML = `<h3><span>${icon('scroll')}Checklist <b>${done}/${QUESTS.length}</b></span><span class="chev"><svg viewBox="0 0 24 24"><path d="M6 9 L12 15 L18 9" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></h3>
       <div class="q-now">${now ? card(now) : ''}</div>
-      <div class="q-list">${meter}${open.map(card).join('')}${finished.length ? `<div class="more">✅ ${finished.length} done · see all in 📜</div>` : ''}</div>`;
+      <div class="q-list">${meter}${open.map(card).join('')}${finished.length ? `<div class="more">${icon('check', 'inline')} ${finished.length} done · tap ${icon('scroll', 'inline')} to see them all</div>` : ''}</div>`;
   }
 
   setHp(hp, max, hit) {
@@ -234,7 +238,9 @@ export class UI {
   toast(text, kind = 'info') {
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
-    el.textContent = text;
+    const [first, rest] = splitLead(text);
+    const lead = first || TOAST_ICON[kind] || 'sparkle';
+    el.innerHTML = `<span class="ti">${icon(lead)}</span><span class="tt">${richText(rest)}</span>`;
     const box = $('#toasts');
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
@@ -243,7 +249,8 @@ export class UI {
 
   banner(text) {
     const b = $('#banner');
-    b.textContent = text;
+    const lead = leadIcon(text);
+    b.innerHTML = `${lead ? icon(lead, 'bn') : ''}<span>${esc(stripEmoji(text))}</span>`;
     b.classList.remove('show');
     void b.offsetWidth;
     b.classList.add('show');
@@ -252,7 +259,7 @@ export class UI {
   chatLine(name, text, sys = false) {
     const el = document.createElement('div');
     el.className = 'line' + (sys ? ' sys' : '');
-    el.innerHTML = sys ? esc(text) : `<b>${esc(name)}:</b> ${esc(text)}`;
+    el.innerHTML = sys ? richText(text) : `<b>${esc(name)}</b> ${richText(text)}`;
     const log = $('#chat-log');
     log.appendChild(el);
     while (log.children.length > 7) log.firstChild.remove();
@@ -274,7 +281,7 @@ export class UI {
 
   buildEmoteWheel() {
     const w = $('#emote-wheel');
-    w.innerHTML = EMOTES.map((e, i) => `<button data-e="${e.id}">${e.icon}<span>${e.label}</span>${i < 9 ? `<small>${i + 1}</small>` : ''}</button>`).join('') + '<div class="hint">💜 Heart goes to the nearest player · 🕺 Dance with friends on the dance floor!</div>';
+    w.innerHTML = EMOTES.map((e, i) => `<button data-e="${e.id}">${icon(e.id)}<span>${e.label}</span>${i < 9 ? `<small>${i + 1}</small>` : ''}</button>`).join('') + `<div class="hint">${icon('heart', 'inline')} Heart goes to the nearest player · ${icon('dance', 'inline')} Dance with friends on the dance floor!</div>`;
     w.onclick = (e) => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -301,16 +308,17 @@ export class UI {
     if (!target) {
       p.classList.add('hidden');
       use.classList.add('idle');
-      use.innerHTML = '✋';
+      use.innerHTML = icon('hand');
       return;
     }
     use.classList.remove('idle');
-    use.innerHTML = `${target.icon || '✋'}<span class="lbl">${esc(target.short || 'Use')}</span>`;
+    const ic = EMOJI_ICON[target.icon] || target.icon || 'hand';
+    use.innerHTML = `${icon(ic) || icon('hand')}<span class="lbl">${esc(target.short || 'Use')}</span>`;
     if (touch) {
       p.classList.add('hidden');
       return;
     }
-    p.innerHTML = `<kbd>E</kbd>${esc(target.label)}`;
+    p.innerHTML = `<kbd>E</kbd>${icon(ic) || ''}<span>${esc(target.label)}</span>`;
     p.classList.remove('hidden');
   }
 
@@ -336,7 +344,7 @@ export class UI {
 
   bossBar(state, name = '👑🎃 The Gourd King') {
     const bar = $('#boss-bar');
-    bar.querySelector('.boss-name').textContent = name;
+    bar.querySelector('.boss-name').innerHTML = `${icon(leadIcon(name) || 'crown')}<span>${esc(stripEmoji(name))}</span>`;
     const active = ['intro', 'fight', 'shield', 'stunned'].includes(state.state);
     bar.classList.toggle('hidden', !active);
     if (!active) return;
@@ -366,7 +374,7 @@ export class UI {
     $('#dialog form').classList.toggle('hidden', !this.typing);
     $('#dialog .mic').classList.toggle('hidden', this.typing);
     $('#dialog .kbd').classList.toggle('hidden', !canTalk);
-    $('#dialog .kbd').textContent = this.typing ? '🎙️' : '⌨️';
+    $('#dialog .kbd').innerHTML = icon(this.typing ? 'mic' : 'keyboard');
     $('#dialog .kbd').title = this.typing ? 'Talk with your voice' : 'Type instead';
     const desk = document.body.classList.contains('desktop');
     $('#dialog .talk-hint').textContent = this.typing
@@ -380,7 +388,7 @@ export class UI {
     const d = $('#dialog');
     d.classList.remove('hidden');
     document.body.classList.add('talking');
-    d.querySelector('.npc-icon').textContent = NPC_ICON[id] || '🙂';
+    d.querySelector('.npc-icon').innerHTML = icon(NPC_ICON[id] || 'smile');
     d.querySelector('.npc-name').textContent = NPCS[id].name;
     d.querySelector('.npc-sub').textContent = NPC_SUB[id] || '';
     d.querySelector('.offer').classList.add('hidden');
@@ -404,8 +412,8 @@ export class UI {
       parts.push(`<button class="btn" data-x="tickets">My tickets</button>`);
     }
     if (id === 'bones') parts.push(`<span class="pill">🎃 ${me.pumpkins} · 🫙 ${me.wisps}</span>`);
-    if (id === 'hex') parts.push(`<button class="btn teal" data-x="buyRevive">🧪 Buy a Revive Potion (20 🍬)</button><span class="pill">🧪 ${me.items?.revive || 0}</span>`);
-    ex.innerHTML = parts.join('');
+    if (id === 'hex') parts.push(`<button class="btn teal" data-x="buyRevive">🧪 Buy a Revive Potion (20 🍬)</button><button class="btn purple" data-x="changeClass">✨ Change class</button><span class="pill">🧪 ${me.items?.revive || 0}</span>`);
+    ex.innerHTML = iconize(parts.join(''));
     ex.onclick = (e) => {
       const b = e.target.closest('[data-x]');
       if (b) this.handlers[b.dataset.x]?.();
@@ -429,7 +437,7 @@ export class UI {
       return;
     }
     const short = offer.price > candy;
-    o.innerHTML = `<span>🤝 ${esc(offer.label)}</span><button class="btn teal" ${short ? 'disabled' : ''}>${short ? `Need ${offer.price} 🍬` : 'Accept'}</button>`;
+    o.innerHTML = `<span>${icon('deal')}${richText(splitLead(offer.label)[1])}</span><button class="btn teal" ${short ? 'disabled' : ''}>${short ? `Need ${offer.price} ${icon('candy', 'inline')}` : 'Accept'}</button>`;
     o.classList.remove('hidden');
     o.querySelector('button').onclick = () => {
       this.handlers.accept?.();
@@ -440,7 +448,7 @@ export class UI {
   // ---------------------------------------------------------------- modals
   modal(html, { onClose, wide } = {}) {
     const m = $('#modal');
-    m.querySelector('.modal-body').innerHTML = html;
+    m.querySelector('.modal-body').innerHTML = iconize(html);
     m.querySelector('.modal-card').style.maxWidth = wide ? 'min(96vw, 900px)' : '';
     m.classList.remove('hidden');
     this.onModalClose = onClose;

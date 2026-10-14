@@ -4,19 +4,18 @@ import {
   THREE, toonMat, glowMat, col, merge, tf, outlineGeometry, outlineMat, glowSprite, glowTexture, GRADIENT, hash3, carve, sphere, cyl, torus, box, cone, clamp,
 } from '../engine/toon.js';
 import * as PR from './props.js';
+import * as P2 from './props2.js';
+import { terrainHeight, insideIsland, islandR, flatness, LANDMARKS } from '../../../shared/terrain.js';
 import {
   ZONES, WORLD_RADIUS, CANDLES, CAULDRON, CARVE_TABLE, BOSS_BELL, BRAZIERS, RITUAL_RUNES, DANCE_FLOOR, BOARD, NPCS, SPAWN, PHOTO_BOOTH,
 } from '../../../shared/world.js';
 
 const rand = (s) => hash3(s * 1.37, s * 7.11, s * 3.3);
 
+// Ground height: rolling hills, landmark hills, flat quest areas and the lake bowl (shared/terrain.js).
 export function groundY(x, z) {
-  const r = Math.hypot(x, z);
-  let h = 0;
-  if (r > 84) h += Math.pow(r - 84, 1.35) * 0.22 + (hash3(Math.round(x / 6), 0, Math.round(z / 6)) - 0.5) * Math.min(1, (r - 84) / 10) * 3;
-  const L = ZONES.lake, d = Math.hypot(x - L.x, z - L.z);
-  if (d < L.r + 2) h -= 1.2 * (1 - smooth(clamp((d - L.r + 3) / 5, 0, 1)));
-  return h;
+  if (x > 300) return 0; // the Gloom Manor team room, far off the island
+  return terrainHeight(x, z);
 }
 const smooth = (t) => t * t * (3 - 2 * t);
 
@@ -32,6 +31,8 @@ export class World {
     this.carvingSlots = [];
     this.anchors = {};
     this.waters = [];
+    // what the maps draw: houses, trees, lamps, landmarks
+    this.features = { houses: [], trees: [], lamps: [], landmarks: [], walls: [] };
     this.build();
   }
 
@@ -101,7 +102,9 @@ export class World {
     this.buildMarket();
     this.buildDance();
     this.buildLake();
-    this.buildHouses();
+    this.buildLandmarks();
+    this.buildVillage();
+    this.buildDressing();
     this.buildScatter();
     this.buildPerimeter();
     this.flush();
@@ -209,35 +212,84 @@ export class World {
 
   // ------------------------------------------------------------ paths and ground
   buildPaths() {
+    // a path is a smooth curve through control points, sampled every ~2.4 m
+    const curve = (pts, width = 2.8, kind = 'road') => {
+      const c = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'catmullrom', 0.5);
+      const n = Math.max(4, Math.round(c.getLength() / 2.4));
+      const out = c.getSpacedPoints(n).map((v) => [v.x, v.z]);
+      out.width = width;
+      out.kind = kind;
+      return out;
+    };
+    // 1. winding roads from the plaza to every place
     const targets = ['graveyard', 'arena', 'circle', 'patch', 'cottage', 'market', 'dance', 'lake'];
     for (const k of targets) {
       const z = ZONES[k];
+      const len = Math.hypot(z.x, z.z), end = len - z.r * 0.4;
+      const nx = -z.z / len, nz = z.x / len;
       const pts = [];
-      const len = Math.hypot(z.x, z.z);
-      const end = len - z.r * 0.5;
-      for (let d = 13; d <= end; d += 3) {
-        const t = d / len;
-        const wob = Math.sin(d * 0.15 + k.length) * 2.2 * Math.sin(Math.PI * Math.min(1, d / end));
-        const nx = -z.z / len, nz = z.x / len;
-        pts.push([z.x * t + nx * wob, z.z * t + nz * wob]);
+      for (let i = 0; i <= 5; i++) {
+        const d = 12.5 + (end - 12.5) * (i / 5), tt = d / len;
+        const wob = i === 0 || i === 5 ? 0 : (Math.sin(i * 1.7 + k.length) * 4.2 + Math.sin(i * 3.1 + k.length * 2) * 1.6);
+        pts.push([z.x * tt + nx * wob, z.z * tt + nz * wob]);
       }
-      this.paths.push(pts);
+      this.paths.push(curve(pts));
     }
-    // woods via the cottage
-    this.paths.push([[ZONES.cottage.x - 6, ZONES.cottage.z - 2], [ZONES.woods.x + 6, ZONES.woods.z + 2]]);
+    // 2. a ring road that links neighbouring places, bowing outward through the hills
+    const ring = ['graveyard', 'arena', 'circle', 'patch', 'dance', 'market', 'lake', 'cottage', 'woods'];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ZONES[ring[i]], b = ZONES[ring[(i + 1) % ring.length]];
+      if (ring[i] === 'woods' && ring[(i + 1) % ring.length] === 'graveyard') continue;
+      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz);
+      const ax = a.x + (dx / L) * a.r * 0.9, az = a.z + (dz / L) * a.r * 0.9, bx = b.x - (dx / L) * b.r * 0.9, bz = b.z - (dz / L) * b.r * 0.9;
+      const mx = (ax + bx) / 2, mz = (az + bz) / 2, ml = Math.hypot(mx, mz) || 1;
+      const bow = 7 + (i % 3) * 3;
+      const pts = [[ax, az], [mx * 0.75 + ax * 0.25 + (mx / ml) * bow * 0.6, mz * 0.75 + az * 0.25 + (mz / ml) * bow * 0.6], [mx + (mx / ml) * bow, mz + (mz / ml) * bow], [mx * 0.75 + bx * 0.25 + (mx / ml) * bow * 0.6, mz * 0.75 + bz * 0.25 + (mz / ml) * bow * 0.6], [bx, bz]];
+      if (pts.every(([x, z]) => insideIsland(x, z, 6))) this.paths.push(curve(pts, 2.3, 'lane'));
+    }
+    // 3. the cottage track into the woods, and trails up to each landmark hill
+    this.paths.push(curve([[ZONES.cottage.x - 6, ZONES.cottage.z - 2], [ZONES.cottage.x - 11, ZONES.cottage.z - 5], [ZONES.woods.x + 6, ZONES.woods.z + 2]], 2.3, 'lane'));
+    const spur = (from, l) => {
+      const dx = l.x - from.x, dz = l.z - from.z, L = Math.hypot(dx, dz);
+      const sx = from.x + (dx / L) * from.r * 0.9, sz = from.z + (dz / L) * from.r * 0.9;
+      const ex = l.x - (dx / L) * 4.5, ez = l.z - (dz / L) * 4.5;
+      // a zigzag up the hill
+      const px = -dz / L, pz = dx / L;
+      this.paths.push(curve([[sx, sz], [sx + dx * 0.35 + px * 4, sz + dz * 0.35 + pz * 4], [sx + dx * 0.6 - px * 4, sz + dz * 0.6 - pz * 4], [ex, ez]], 2, 'trail'));
+    };
+    spur(ZONES.circle, LANDMARKS.windmill);
+    spur(ZONES.graveyard, LANDMARKS.tower);
+    spur(ZONES.market, LANDMARKS.chapel);
+
+    // ribbons that follow the ground
     const geos = [];
     for (const p of this.paths) {
-      for (let i = 0; i < p.length - 1; i++) {
-        const [ax, az] = p[i], [bx, bz] = p[i + 1];
-        const len = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(bx - ax, bz - az);
-        const seg = new THREE.PlaneGeometry(2.8, len + 1.2, 4, 3);
-        seg.rotateX(-Math.PI / 2);
-        geos.push(col(tf(seg, { p: [(ax + bx) / 2, 0.035 + i * 0.0001, (az + bz) / 2], r: [0, yaw, 0] }), (x, y, z) => {
-          const n = hash3(Math.round(x * 1.5), 0, Math.round(z * 1.5));
-          return n > 0.55 ? '#7d6b6a' : n > 0.25 ? '#706060' : '#665656';
-        }, 0.04, false));
-        // stepping stones edge
+      const w = (p.width || 2.8) / 2, n = p.length;
+      const pos = [], cols = [], idx = [];
+      for (let i = 0; i < n; i++) {
+        const [x, z] = p[i];
+        const [x0, z0] = p[Math.max(0, i - 1)], [x1, z1] = p[Math.min(n - 1, i + 1)];
+        const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1;
+        const nx = -dz / L, nz = dx / L;
+        for (const s of [-1, -0.5, 0, 0.5, 1]) {
+          const px = x + nx * w * s, pz = z + nz * w * s;
+          pos.push(px, groundY(px, pz) + 0.06 + (1 - Math.abs(s)) * 0.02, pz);
+          const h = hash3(Math.round(px * 1.5), 0, Math.round(pz * 1.5));
+          const c = new THREE.Color(p.kind === 'trail' ? (h > 0.5 ? '#6d5a48' : '#5f4e40') : h > 0.55 ? '#7d6b6a' : h > 0.25 ? '#706060' : '#665656');
+          if (Math.abs(s) === 1) c.multiplyScalar(0.82);
+          cols.push(c.r, c.g, c.b);
+        }
+        if (i < n - 1) for (let k = 0; k < 4; k++) {
+          const a = i * 5 + k, b = a + 5;
+          idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
       }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      geos.push(g);
     }
     const m = new THREE.Mesh(merge(geos), toonMat);
     m.renderOrder = 0;
@@ -245,7 +297,7 @@ export class World {
   }
 
   buildGround() {
-    const size = 280, seg = this.quality > 0 ? 150 : 90;
+    const size = 300, seg = this.quality > 0 ? 200 : 120;
     const g = new THREE.PlaneGeometry(size, size, seg, seg);
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position;
@@ -255,8 +307,12 @@ export class World {
     const colG = col(g, (x, y, z) => {
       const n = hash3(Math.round(x / 3), 0, Math.round(z / 3)) * 0.6 + hash3(Math.round(x), 1, Math.round(z)) * 0.4;
       const c = new THREE.Color('#3a5a44').lerp(new THREE.Color('#2c4a3c'), n);
-      const r = Math.hypot(x, z);
-      if (r > 84) c.lerp(new THREE.Color('#283a33'), clamp((r - 84) / 20, 0, 1));
+      // hills: lighter, mossier on the tops, a little heather purple here and there
+      const h = groundY(x, z);
+      if (h > 1.2) c.lerp(new THREE.Color(hash3(Math.round(x / 7), 2, Math.round(z / 7)) > 0.7 ? '#5a4a6a' : '#4f7050'), clamp((h - 1.2) / 6, 0, 0.65));
+      if (h < -0.2) c.lerp(new THREE.Color('#2a4038'), 0.4);
+      const r = Math.hypot(x, z), edge = islandR(Math.atan2(z, x));
+      if (r > edge - 3) c.lerp(new THREE.Color('#283a33'), clamp((r - edge + 3) / 12, 0, 1));
       const dl = Math.hypot(x - L.x, z - L.z);
       if (dl < L.r + 2.5) c.lerp(new THREE.Color('#5a4f45'), clamp(1 - (dl - L.r) / 2.5, 0, 1) * 0.8);
       const dp = Math.hypot(x - ZONES.patch.x, z - ZONES.patch.z);
@@ -272,7 +328,6 @@ export class World {
     this.ground = ground;
   }
 
-  // ------------------------------------------------------------ zones
   buildPlaza() {
     const P0 = ZONES.plaza;
     // cobbled disc in rings
@@ -467,14 +522,15 @@ export class World {
     for (let i = 0; i < 160 && placed < 34; i++) {
       const a = rand(i + 500) * Math.PI * 2, r = Math.sqrt(rand(i + 510)) * (W.r + 6);
       const x = W.x + Math.cos(a) * r, z = W.z + Math.sin(a) * r;
-      if (Math.hypot(x, z) > WORLD_RADIUS - 2 || !this.freeSpot(x, z, 2.6) || this.nearPath(x, z, 2.5) || this.inZone(x, z, 1) && Math.hypot(x - W.x, z - W.z) > W.r) continue;
+      if (!insideIsland(x, z, 2) || !this.freeSpot(x, z, 2.6) || this.nearPath(x, z, 2.5) || this.inZone(x, z, 1) && Math.hypot(x - W.x, z - W.z) > W.r) continue;
       const k = i % 3;
       this.place(k === 0 ? PR.deadTree(i, 4 + rand(i) * 3) : k === 1 ? PR.pine(i, 5 + rand(i) * 3) : PR.roundTree(i, 3 + rand(i) * 1.5), x, z, rand(i + 1) * 6, 1, 'woods');
+      this.features.trees.push({ x, z, r: 2, k: k === 1 ? 'pine' : k === 0 ? 'dead' : 'round' });
       placed++;
     }
     for (let i = 0; i < 16; i++) {
       const x = W.x + (rand(i + 600) - 0.5) * W.r * 2, z = W.z + (rand(i + 610) - 0.5) * W.r * 2;
-      if (Math.hypot(x, z) < WORLD_RADIUS - 2) this.place(PR.mushroom(i + 90, 1 + rand(i) * 0.8), x, z, 0, 1, 'woods');
+      if (insideIsland(x, z, 2)) this.place(PR.mushroom(i + 90, 1 + rand(i) * 0.8), x, z, 0, 1, 'woods');
     }
   }
 
@@ -578,68 +634,139 @@ export class World {
     }
   }
 
-  buildHouses() {
-    // a crooked little town between the zones
-    const spots = [[-17, -18], [16, -19], [22, 22], [-19, 21], [-27, -6], [24, -9], [-6, -27], [8, 24], [-8, 24], [38, 28], [-50, 24], [52, -22]];
-    spots.forEach(([x, z], i) => {
-      if (this.nearPath(x, z, 4) || !this.freeSpot(x, z, 3.5)) {
-        // nudge along the ring until it fits
-        for (let k = 1; k < 10; k++) {
-          const a = Math.atan2(z, x) + k * 0.12 * (k % 2 ? 1 : -1);
-          const r = Math.hypot(x, z);
-          const nx = Math.cos(a) * r, nz = Math.sin(a) * r;
-          if (!this.nearPath(nx, nz, 4) && this.freeSpot(nx, nz, 3.5) && !this.inZone(nx, nz, 2)) {
-            x = nx;
-            z = nz;
-            break;
-          }
-        }
-      }
-      if (this.nearPath(x, z, 4) || !this.freeSpot(x, z, 3.5)) return;
-      const rot = Math.atan2(-x, -z) + (rand(i) - 0.5) * 0.4;
-      const h = PR.house(i + 1);
-      this.place(h, x, z, rot, 1, 'houses');
-      this.place(PR.pumpkin(i + 200, 0.6, true), x + Math.sin(rot) * 3.2 + Math.cos(rot) * 1.2, z + Math.cos(rot) * 3.2 - Math.sin(rot) * 1.2, rot, 1, 'houses');
-    });
-  }
-
   buildScatter() {
     let n = 0;
-    for (let i = 0; i < 700 && n < 70; i++) {
-      const a = rand(i + 900) * Math.PI * 2, r = 16 + Math.sqrt(rand(i + 910)) * (WORLD_RADIUS - 18);
+    for (let i = 0; i < 1400 && n < 130; i++) {
+      const a = rand(i + 900) * Math.PI * 2, r = 16 + Math.sqrt(rand(i + 910)) * 80;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      if (this.inZone(x, z, 3) || this.nearPath(x, z, 3) || !this.freeSpot(x, z, 2.4)) continue;
+      if (!insideIsland(x, z, 4) || this.inZone(x, z, 3) || this.nearPath(x, z, 3) || !this.freeSpot(x, z, 2.4)) continue;
       const k = rand(i + 920);
-      const o = k < 0.35 ? PR.roundTree(i, 3 + rand(i) * 1.6) : k < 0.55 ? PR.deadTree(i, 3.5 + rand(i) * 2) : k < 0.7 ? PR.pine(i, 4.5 + rand(i) * 2) : k < 0.82 ? PR.rock(i, 0.8 + rand(i)) : k < 0.92 ? PR.pumpkin(i, 0.6 + rand(i) * 0.6, rand(i + 1) > 0.5) : PR.mushroom(i, 1);
-      this.place(o, x, z, rand(i + 1) * 6, 1, n % 2 ? 'scatterA' : 'scatterB');
+      const tall = k < 0.62;
+      const o = k < 0.3 ? PR.roundTree(i, 3 + rand(i) * 1.6) : k < 0.47 ? PR.deadTree(i, 3.5 + rand(i) * 2) : k < 0.62 ? PR.pine(i, 4.5 + rand(i) * 2) : k < 0.72 ? PR.rock(i, 0.8 + rand(i)) : k < 0.8 ? P2.bush(i, 0.8 + rand(i) * 0.6) : k < 0.86 ? PR.pumpkin(i, 0.6 + rand(i) * 0.6, rand(i + 1) > 0.5) : k < 0.92 ? P2.log(i) : PR.mushroom(i, 1);
+      this.place(o, x, z, rand(i + 1) * 6, 1, n % 3 === 0 ? 'scatterA' : n % 3 === 1 ? 'scatterB' : 'scatterC');
+      if (tall) this.features.trees.push({ x, z, r: 2, k: k < 0.3 ? 'round' : k < 0.47 ? 'dead' : 'pine' });
       n++;
     }
-    for (let i = 0; i < 90; i++) {
-      const a = rand(i + 1200) * Math.PI * 2, r = 16 + Math.sqrt(rand(i + 1210)) * (WORLD_RADIUS - 16);
+    for (let i = 0; i < 160; i++) {
+      const a = rand(i + 1200) * Math.PI * 2, r = 16 + Math.sqrt(rand(i + 1210)) * 80;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      if (this.nearPath(x, z, 1.8) || this.inZone(x, z, 0)) continue;
-      this.place(PR.grassTuft(i), x, z, a, 1, 'tufts');
+      if (!insideIsland(x, z, 2) || this.nearPath(x, z, 1.8) || this.inZone(x, z, 0)) continue;
+      this.place(i % 4 ? PR.grassTuft(i) : P2.flowers(i), x, z, a, 1, 'tufts');
     }
     this.chunk('tufts').outline = false;
   }
 
   buildPerimeter() {
-    const ring = [];
-    for (let i = 0; i < 230; i++) {
-      const a = (i / 230) * Math.PI * 2 + rand(i) * 0.03;
-      const r = WORLD_RADIUS + 2 + rand(i + 1500) * 22;
-      ring.push([Math.cos(a) * r, Math.sin(a) * r, i]);
-    }
-    for (const [x, z, i] of ring) {
+    // a thick wood along the wavy coast
+    for (let i = 0; i < 300; i++) {
+      const a = (i / 300) * Math.PI * 2 + rand(i) * 0.02;
+      const r = islandR(a) + 1 + rand(i + 1500) * 24;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
       const k = rand(i + 1600);
       const o = k < 0.5 ? PR.pine(i, 6 + rand(i) * 4) : k < 0.8 ? PR.deadTree(i, 5 + rand(i) * 3) : PR.roundTree(i, 4 + rand(i) * 2);
       this.place(o, x, z, rand(i + 2) * 6, 1.1 + rand(i + 3) * 0.5, 'ring' + (i % 4));
+      if (r < islandR(a) + 8) this.features.trees.push({ x, z, r: 2.5, k: 'pine' });
     }
     for (let i = 0; i < 4; i++) this.chunk('ring' + i).outline = this.quality > 1;
-    // invisible wall at the island edge is handled by the player controller (WORLD_RADIUS)
   }
 
-  // ------------------------------------------------------------ light sprites and ambient life
+  // ------------------------------------------------------------ landmarks on their hills
+  buildLandmarks() {
+    const W = LANDMARKS.windmill;
+    this.place(P2.windmill(), W.x, W.z, Math.atan2(-W.x, -W.z), 1, 'landmarks');
+    const sails = new THREE.Mesh(merge(P2.sails()), toonMat);
+    const face = Math.atan2(-W.x, -W.z);
+    sails.position.set(W.x + Math.sin(face) * 1.95, groundY(W.x, W.z) + 6.2, W.z + Math.cos(face) * 1.95);
+    sails.rotation.y = face;
+    this.scene.add(sails);
+    this.sails = sails;
+    const T = LANDMARKS.tower;
+    this.place(P2.watchtower(), T.x, T.z, Math.atan2(-T.x, -T.z), 1, 'landmarks');
+    const C = LANDMARKS.chapel;
+    this.place(P2.chapel(), C.x, C.z, Math.atan2(-C.x, -C.z), 1, 'landmarks');
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + 0.4, x = C.x + Math.cos(a) * 8, z = C.z + Math.sin(a) * 8;
+      if (!this.nearPath(x, z, 2) && this.freeSpot(x, z, 0.8)) this.place(PR.grave(i + 300), x, z, Math.atan2(C.x - x, C.z - z), 1, 'landmarks');
+    }
+    for (const l of Object.values(LANDMARKS)) this.features.landmarks.push({ x: l.x, z: l.z, name: l.name, icon: l === W ? 'windmill' : l === T ? 'tower' : 'chapel' });
+    this.features.landmarks.push({ x: 0, z: -80, name: 'Gloom Manor', icon: 'manor' });
+  }
+
+  // ------------------------------------------------------------ the village: detailed houses along the roads
+  buildVillage() {
+    let made = 0;
+    const styles = ['cottage', 'town', 'cottage', 'tower', 'town', 'cottage'];
+    for (const [pi, p] of this.paths.entries()) {
+      if (p.kind === 'trail') continue;
+      for (let i = 2; i < p.length - 2; i += 3) for (const [side, off] of [[1, 7.5], [-1, 7.5], [1, 11], [-1, 11]]) {
+        const [x0, z0] = p[i - 1], [x1, z1] = p[i + 1];
+        const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1;
+        const x = p[i][0] + (-dz / L) * off * side, z = p[i][1] + (dx / L) * off * side;
+        const st = (this.villageStats ||= { tried: 0, coast: 0, zone: 0, path: 0, taken: 0, steep: 0 });
+        st.tried++;
+        if (!insideIsland(x, z, 8)) { st.coast++; continue; }
+        if (this.inZone(x, z, 3)) { st.zone++; continue; }
+        if (this.nearPath(x, z, 5)) { st.path++; continue; }
+        if (!this.freeSpot(x, z, 4)) { st.taken++; continue; }
+        if (Math.abs(groundY(x + 2, z) - groundY(x - 2, z)) > 1.6 || Math.abs(groundY(x, z + 2) - groundY(x, z - 2)) > 1.6) { st.steep++; continue; }
+        const rot = Math.atan2(p[i][0] - x, p[i][1] - z);
+        const style = styles[(made + pi) % styles.length];
+        const h = P2.houseV2(pi * 100 + i + 1, style);
+        this.place(h, x, z, rot, 1, made % 2 ? 'housesA' : 'housesB');
+        this.features.houses.push({ x, z, rot, s: style === 'tower' ? 2 : 2.4, style });
+        // a picket fence and a bush or two in front
+        const fx = x + Math.sin(rot) * 4.6, fz = z + Math.cos(rot) * 4.6;
+        if (made % 3 !== 2) {
+          for (const s of [-1, 1]) this.place(P2.picketFence(1.8), fx + Math.cos(rot) * s * 1.9, fz - Math.sin(rot) * s * 1.9, rot, 1, 'housesA');
+        }
+        this.place(P2.bush(made + 40, 0.9), x + Math.cos(rot) * 3.4, z - Math.sin(rot) * 3.4, 0, 1, 'housesB');
+        if (made % 4 === 1) this.place(P2.pumpkinPile(made), x - Math.cos(rot) * 3.2 + Math.sin(rot) * 3, z + Math.sin(rot) * 3.2 + Math.cos(rot) * 3, 0, 1, 'housesB');
+        made++;
+        if (made >= 40) return;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ lamps, signposts and small things along the roads
+  buildDressing() {
+    // lamps every ~15 m on the roads, lanterns on poles along the lanes and trails
+    let k = 0;
+    for (const p of this.paths) {
+      const step = p.kind === 'road' ? 6 : 7;
+      for (let i = 2; i < p.length - 1; i += step) {
+        const [x0, z0] = p[i - 1], [x1, z1] = p[i + 1];
+        const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1;
+        const side = k % 2 ? 1 : -1;
+        const x = p[i][0] + (-dz / L) * (p.width / 2 + 0.9) * side, z = p[i][1] + (dx / L) * (p.width / 2 + 0.9) * side;
+        if (this.inZone(x, z, 0) || !this.freeSpot(x, z, 0.6)) continue;
+        const face = Math.atan2(p[i][0] - x, p[i][1] - z) - Math.PI / 2;
+        this.place(p.kind === 'road' ? PR.lampPost(k) : P2.lanternPole(k), x, z, face, 1, 'lamps');
+        this.features.lamps.push({ x, z });
+        k++;
+      }
+    }
+    // signposts where the roads leave the plaza
+    for (const [i, p] of this.paths.slice(0, 8).entries()) {
+      const [x, z] = p[1];
+      const a = Math.atan2(p[3][1] - z, p[3][0] - x);
+      this.place(P2.signpostV2([0.4, -0.5], i), x + Math.cos(a + 1.4) * 2.2, z + Math.sin(a + 1.4) * 2.2, -a, 1, 'lamps');
+    }
+    // wells, carts, walls, logs and fairy rings in the open country
+    const spots = [[18, 12, 'well'], [-16, -12, 'well'], [24, 30, 'cart'], [52, 18, 'cart'], [-22, 30, 'cart'], [-46, 32, 'ring'], [44, -44, 'ring'], [-60, 18, 'ring'], [20, -42, 'wall'], [-44, -22, 'wall'], [40, 54, 'wall'], [-14, 52, 'wall']];
+    for (const [x, z, kind] of spots) {
+      if (this.inZone(x, z, 2) || this.nearPath(x, z, 2.5) || !this.freeSpot(x, z, 1.5) || !insideIsland(x, z, 6)) continue;
+      const o = kind === 'well' ? P2.well() : kind === 'cart' ? P2.cart(x + z) : kind === 'ring' ? P2.mushroomRing(x) : P2.stoneWall(7, x);
+      this.place(o, x, z, rand(x * 3 + z) * 6, 1, 'dressing');
+      if (kind === 'wall') this.features.walls.push({ x, z });
+    }
+    for (let i = 0; i < 40; i++) {
+      const a = rand(i + 3000) * Math.PI * 2, r = 18 + rand(i + 3010) * 60;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (!insideIsland(x, z, 5) || this.inZone(x, z, 2) || this.nearPath(x, z, 2.2) || !this.freeSpot(x, z, 1)) continue;
+      this.place(i % 3 ? P2.bush(i + 500, 0.7 + rand(i) * 0.6) : P2.flowers(i + 500), x, z, 0, 1, 'dressing');
+    }
+  }
+
   buildLightSprites() {
     for (const l of this.lights) {
       const s = glowSprite(l.c, l.s, 0.55);
@@ -699,6 +826,7 @@ export class World {
   }
 
   update(t, dt, camera, partying = 0) {
+    if (this.sails) this.sails.rotation.z = t * 0.35;
     this.starMat.uniforms.t.value = t;
     this.fireflyMat.uniforms.t.value = t;
     if (this.danceMat) {

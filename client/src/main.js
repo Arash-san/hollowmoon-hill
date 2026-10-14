@@ -17,9 +17,12 @@ import { potionGame } from './games/potion.js';
 import { carveGame } from './games/carve.js';
 import { showMap } from './map.js';
 import { MiniMap } from './minimap.js';
+import { icon, preloadIcons } from './icons.js';
 import { photoBoothModal } from './photobooth.js';
 import { Spiders } from './spiders.js';
 import { CLUES } from '../../shared/story.js';
+import * as F from './features.js';
+import { MANOR_DOOR, ROOM_EXIT, CLASSES } from '../../shared/features.js';
 import {
   NPCS, faceYaw, CANDLES, CANDLE_TIME, CAULDRON, CARVE_TABLE, BOSS_BELL, BRAZIERS, BOARD, ZONES, EMOTES, QUESTS, DANCE_FLOOR, SPAWN, WISP_SLOTS, wispPos,
   PHOTO_BOOTH, QUEST_ICON,
@@ -40,7 +43,7 @@ const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in windo
 
 class Game {
   async boot() {
-    await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 1500))]);
+    await Promise.race([Promise.all([document.fonts?.ready, preloadIcons()]), new Promise((r) => setTimeout(r, 2500))]);
     this.ui = new UI();
     this.audio = new Audio();
     this.stage = new Stage(document.getElementById('app'));
@@ -54,6 +57,12 @@ class Game {
     // the finale: Mayor Gourdon as the giant Pumpkin King, rising from the plaza fountain
     this.finale = new BossView(this.scene, this.fx, this.audio, 'mayor');
     this.finaleState = { state: 'idle' };
+    // the Pumpkin Bear at the Summoning Circle (a Moon Potion wakes it)
+    this.bearView = new BossView(this.scene, this.fx, this.audio, 'bear');
+    this.bearState = { state: 'idle' };
+    // the Gloom Manor team room (built once, far off the island)
+    this.roomArt = F.buildRoom(this.scene);
+    this.myRoom = 0;
     this.spiders = new Spiders(this.scene, this.fx);
     this.hp = 100;
     this.downUntil = 0;
@@ -121,6 +130,7 @@ class Game {
     ui.on('buyTicket', () => this.net.send({ t: 'buyTicket' }));
     ui.on('tickets', () => ui.tickets(this.state));
     ui.on('buyRevive', () => this.net.send({ t: 'buyRevive' }));
+    ui.on('changeClass', () => F.classPicker(this));
     ui.on('listening', () => this.stopVoice());
     ui.on('dialogClosed', () => {
       this.stopVoice();
@@ -143,6 +153,8 @@ class Game {
     tapBtn('#act-emote', () => ui.toggleEmotes());
     tapBtn('#act-chat', () => (ui.chatOpen() ? ui.closeChat() : ui.openChat()));
     tapBtn('#act-attack', () => this.attack());
+    tapBtn('#act-special', () => F.usePower(this));
+    tapBtn('#act-lantern', () => F.teamFlash(this));
     tapBtn('#prompt', () => this.interact());
     document.querySelector('#map-btn').onclick = () => showMap(ui, this);
     document.querySelector('#minimap').onclick = () => showMap(ui, this);
@@ -162,9 +174,9 @@ class Game {
     document.querySelector('#candy-pill').onclick = () => ui.toast('🍬 Candy buys potions, costume swaps and Treat Tickets (from the mayor).');
     document.querySelector('#sound-btn').onclick = (e) => {
       this.audio.start();
-      e.currentTarget.textContent = this.audio.toggle() ? '🔊' : '🔇';
+      e.currentTarget.innerHTML = icon(this.audio.toggle() ? 'sound' : 'mute');
     };
-    document.querySelector('#sound-btn').textContent = this.audio.on ? '🔊' : '🔇';
+    document.querySelector('#sound-btn').innerHTML = icon(this.audio.on ? 'sound' : 'mute');
     inp.on('jump', () => this.jump());
     inp.on('interact', () => this.interact());
     inp.on('emotes', () => ui.toggleEmotes());
@@ -173,6 +185,8 @@ class Game {
     inp.on('quests', () => this.questsModal());
     inp.on('journal', () => this.state && this.ui.journal(this.state));
     inp.on('attack', () => this.attack());
+    inp.on('power', () => F.usePower(this));
+    inp.on('lantern', () => F.teamFlash(this));
     inp.on('escape', () => {
       ui.closeEmotes();
       ui.closeChat();
@@ -229,17 +243,47 @@ class Game {
     n.on('bats', (m) => this.charById(m.id)?.setBats(m.on));
     n.on('carving', (m) => this.acts.setCarving(m.item));
     n.on('carvingLikes', (m) => this.acts.setCarvingLikes(m.id, m.likes));
-    n.on('boss', (m) => (m.b === 'mayor' ? this.onFinale(m) : this.onBoss(m)));
-    n.on('bossAtk', (m) => (m.b === 'mayor' ? this.finale : this.boss).attack(m, n.serverTime()));
+    n.on('boss', (m) => (m.b === 'mayor' ? this.onFinale(m) : m.b === 'bear' ? this.onBear(m) : this.onBoss(m)));
+    n.on('bossAtk', (m) => this.viewOf(m.b).attack(m, n.serverTime()));
     n.on('bossHit', (m) => {
-      const mayor = m.b === 'mayor';
-      (mayor ? this.finale : this.boss).onHit(m.by, m.dmg);
-      const st = mayor ? this.finaleState : this.bossState;
+      this.viewOf(m.b).onHit(m.by, m.dmg);
+      const st = m.b === 'mayor' ? this.finaleState : m.b === 'bear' ? this.bearState : this.bossState;
       st.hp = m.hp;
       this.refreshBossBar();
     });
+    n.on('cls', (m) => {
+      const c = this.charById(m.id);
+      if (c && m.id !== this.myId) this.ui.chatLine('', `${c.name} is now a ${CLASSES[m.cls]?.name}!`, true);
+    });
+    n.on('power', (m) => {
+      const c = this.charById(m.id);
+      if (!c || m.id === this.myId) return;
+      if (m.cls === 'zombie') this.fx.ring(c.pos.clone().setY(0.3), '#9ed36a', 7, 0.7);
+      if (m.cls === 'vampire') this.fx.emoji('🦇', c.pos.clone().setY(c.pos.y + 1.5), 3, { size: 0.5 });
+    });
+    n.on('pvpHit', (m) => {
+      const c = this.charById(m.id);
+      if (c) this.fx.sparkle(c.pos.clone().setY(c.pos.y + 1.2), '#ff8fb8', 12, 1);
+    });
+    n.on('inRoom', (m) => {
+      const c = this.others.get(m.id);
+      if (c) (c.room = m.room), (c.teamColor = m.color);
+      if (m.id === this.myId) this.myColor = m.color;
+    });
+    n.on('room', (m) => {
+      this.room = m;
+      F.renderRoomPanel(this);
+    });
+    n.on('roomHints', (m) => {
+      this.roomHints = m.hints;
+      F.renderRoomPanel(this);
+      this.audio.play('ritual');
+    });
+    n.on('roomStep', (m) => F.roomStep(this, m));
+    n.on('contest', (m) => F.renderContest(this, m));
     n.on('hp', (m) => {
       this.hp = m.hp;
+      if (m.color) this.myColor = m.color;
       this.ui.setHp(m.hp, m.max, m.hit);
       if (m.hit && this.me) this.fx.text(`-${m.hit} ❤️`, this.me.pos.clone().setY(this.me.pos.y + 2.4), '#ff6b6b', 0.42);
     });
@@ -260,6 +304,14 @@ class Game {
     n.on('event', (m) => this.onEvent(m));
     n.on('teleport', (m) => {
       if (!this.me) return;
+      if (m.room !== undefined) {
+        this.myRoom = m.room;
+        if (!m.room) {
+          this.room = null;
+          this.roomHints = null;
+          F.renderRoomPanel(this);
+        }
+      }
       this.me.pos.set(m.x, 0, m.z);
       this.ctrl.snapCam = true;
       this.sendMove(true);
@@ -273,7 +325,7 @@ class Game {
     // Madame Hex's prophecy, once per browser
     if (first && !localStorage.getItem('hh-prophecy')) setTimeout(() => {
       localStorage.setItem('hh-prophecy', '1');
-      this.ui.prophecy();
+      this.ui.prophecy(() => !this.state?.cls && F.classPicker(this, { first: true }));
     }, 1600);
     if (first) {
       this.me = new Character(this.scene, this.fx, { spec: m.me.avatar, name: m.me.name, title: m.me.avatar.title, likes: m.me.likes });
@@ -305,6 +357,9 @@ class Game {
     for (const mi of m.world.minions || []) this.boss.addMinion(mi);
     if (m.world.finale) this.onFinale({ ...m.world.finale });
     for (const mi of m.world.finaleMinions || []) this.finale.addMinion(mi);
+    if (m.world.bear) this.onBear({ ...m.world.bear });
+    for (const mi of m.world.bearMinions || []) this.bearView.addMinion(mi);
+    if (m.world.contest) F.renderContest(this, { state: 'on', ...m.world.contest });
     this.ui.setOnline(this.others.size + 1);
   }
 
@@ -319,6 +374,7 @@ class Game {
     }
     if (this.me) this.me.setBats(!!(this.state.debt && this.state.debt.late));
     // officer moderation: remember when each one ends on our own clock
+    F.updateClassHud(this);
     if (me.mod) this.modUntil = Object.fromEntries(Object.entries(me.mod).map(([k, ms]) => [k, performance.now() + ms]));
   }
 
@@ -348,6 +404,8 @@ class Game {
     c.yaw = p.ry;
     if (p.fx) c.applyEffect(p.fx);
     c.carving = p.carving;
+    c.room = p.room || 0;
+    c.teamColor = p.color;
     if (p.down) c.setPumpkin(true, p.carving);
     c.down = !!p.down;
     this.others.set(p.id, c);
@@ -486,7 +544,8 @@ class Game {
   onNpc(m) {
     const npc = this.npcs.get(m.npc);
     if (npc) {
-      // the reply is a speech bubble over their head (paged if it is long)
+      // the reply is a speech bubble over their head (paged if it is long); my own line makes room for it
+      if (this.ui.dialogNpc === m.npc) this.me?.hideBubble();
       npc.speak(m.say);
       npc.talking = performance.now() + Math.min(5000, 900 + m.say.length * 45);
       this.audio.play('babble', { pitch: NPC_PITCH[m.npc], len: m.say.length });
@@ -520,9 +579,64 @@ class Game {
 
   // One boss bar: the finale wins over the Gourd King if both are up.
   refreshBossBar() {
-    const f = this.finaleState;
-    if (['intro', 'fight', 'shield', 'stunned'].includes(f.state)) this.ui.bossBar(f, '🎩🎃 Mayor Gourdon, the Pumpkin King');
+    const live = (s) => ['intro', 'fight', 'shield', 'stunned'].includes(s.state);
+    if (live(this.finaleState)) this.ui.bossBar(this.finaleState, '🎩 Mayor Gourdon, the Pumpkin King');
+    else if (live(this.bearState) && !live(this.bossState)) this.ui.bossBar(this.bearState, '🐻 The Pumpkin Bear');
     else this.ui.bossBar(this.bossState);
+  }
+
+  onBear(m) {
+    const prev = this.bearState.state;
+    this.bearState = { ...this.bearState, ...m };
+    delete this.bearState.t;
+    this.bearView.setState(this.bearState);
+    this.refreshBossBar();
+    if (prev !== m.state && m.state === 'intro') this.ui.banner('🐻 THE PUMPKIN BEAR 🐻');
+  }
+
+  viewOf(b) {
+    return b === 'mayor' ? this.finale : b === 'bear' ? this.bearView : this.boss;
+  }
+  viewFor(target) {
+    if (target.b) return this.viewOf(target.b);
+    if (target.kind === 'minion') {
+      for (const v of [this.finale, this.bearView, this.boss]) if (v.minions.has(target.id)) return v;
+    }
+    return this.boss;
+  }
+
+  // What a throw would hit: the nearest spider, then a live boss (or its minions) in reach.
+  pickTarget(range = 8, { players = false } = {}) {
+    const p = this.me.pos;
+    const cands = [this.spiders.nearest(p, range)];
+    for (const v of [this.finale, this.bearView, this.boss]) if (v.active()) cands.push(v.nearestTarget(p));
+    if (players) cands.push(this.duelTarget());
+    // the nearest of everything in reach (a boss counts from its body, not its centre)
+    let best = null, bd = Infinity;
+    for (const c of cands) {
+      if (!c) continue;
+      const d = c.pos().distanceTo(p) - (c.kind === 'boss' ? 3 : 0);
+      if (d < bd) (bd = d), (best = c);
+    }
+    return best;
+  }
+
+  // In the courtyard while the Gourd King sleeps, friends can duel with candy.
+  duelTarget() {
+    if (!F.inDuelZone(this.me.pos, this)) return null;
+    let best = null, bd = 12;
+    for (const [id, o] of this.others) {
+      if (o.down || o.room || !F.inDuelZone(o.pos, this)) continue;
+      const d = o.pos.distanceTo(this.me.pos);
+      if (d < bd) (bd = d), (best = { kind: 'player', id, pos: () => o.pos.clone().setY(o.pos.y + 1.2) });
+    }
+    return best;
+  }
+
+  openContestCarve() {
+    const c = this.contest;
+    if (!c) return;
+    carveGame(this.ui, this.audio, (png, score) => this.net.send({ t: 'carve', png, contest: true, score }), { stencil: c.stencil, until: c.until - 12000 });
   }
 
   onDown(m) {
@@ -600,17 +714,17 @@ class Game {
     if (!this.me || this.downUntil) return;
     const now = performance.now();
     if (now - (this.lastThrow || 0) < 380) return;
-    const target = this.spiders.nearest(this.me.pos, 8)
-      || (this.finale.active() && this.finale.nearestTarget(this.me.pos))
-      || (this.boss.active() && this.boss.nearestTarget(this.me.pos));
+    const target = this.pickTarget(8, { players: true });
     if (!target) return;
     this.lastThrow = now;
     this.me.yaw = Math.atan2(target.pos().x - this.me.pos.x, target.pos().z - this.me.pos.z);
     this.me.emote('wave');
     this.audio.play('throw');
     const from = this.me.pos.clone().setY(this.me.pos.y + 1.4);
-    const view = target.b === 'mayor' || (target.kind === 'minion' && this.finale.minions.has(target.id) && !this.boss.minions.has(target.id)) ? this.finale : this.boss;
-    view.throwAt(from, target, () => this.net.send({ t: 'hit', kind: target.kind, id: target.id, b: view.id }), this.state?.items?.fire ? '🔥' : '🍬');
+    const icon = this.state?.items?.fire ? '🔥' : '🍬';
+    if (target.kind === 'player') return this.boss.throwAt(from, target, () => this.net.send({ t: 'pvp', id: target.id }), icon);
+    const view = this.viewFor(target);
+    view.throwAt(from, target, () => this.net.send({ t: 'hit', kind: target.kind, id: target.id, b: view.id }), icon);
   }
 
   // Everything you can interact with near the player, nearest first.
@@ -632,6 +746,9 @@ class Game {
     list.push({ x: CAULDRON.x, z: CAULDRON.z, r: 3, icon: '🧪', short: 'Brew', label: 'Brew a potion', act: () => potionGame(this.ui, this.audio, (score) => this.net.send({ t: 'quest', id: 'potion', score })), pri: 1 });
     list.push({ x: CARVE_TABLE.x, z: CARVE_TABLE.z, r: 3, icon: '🔪', short: 'Carve', label: 'Carve a pumpkin', act: () => carveGame(this.ui, this.audio, (png) => this.net.send({ t: 'carve', png })), pri: 1 });
     list.push({ x: BOARD.x, z: BOARD.z, r: 3, icon: '📜', short: 'Read', label: 'Read the quest board', act: () => this.questsModal(), pri: 0 });
+    list.push({ x: MANOR_DOOR.x, z: MANOR_DOOR.z, r: 4, icon: '🏚️', short: 'Enter', label: 'Enter Gloom Manor (team room for 2-4)', act: () => this.net.send({ t: 'enterRoom' }), pri: 2 });
+    if (this.myRoom) list.push({ x: ROOM_EXIT.x, z: ROOM_EXIT.z, r: 2.6, icon: '🚪', short: 'Leave', label: 'Leave Gloom Manor', act: () => this.net.send({ t: 'leaveRoom' }), pri: 3 });
+    if (this.contest) list.push({ x: CARVE_TABLE.x, z: CARVE_TABLE.z, r: 3, icon: '🔪', short: 'Contest', label: 'Carve the contest design!', act: () => this.openContestCarve(), pri: 2 });
     list.push({ x: PHOTO_BOOTH.x, z: PHOTO_BOOTH.z, r: 4.2, icon: '📸', short: 'Photo', label: 'Step into the Photo Booth', act: () => photoBoothModal(this.ui, this), pri: 2 });
     const bs = this.bossState.state;
     if (bs === 'idle') list.push({ x: BOSS_BELL.x, z: BOSS_BELL.z, r: 3.5, icon: '🔔', short: 'Ring', label: 'Ring the bell (wakes the Gourd King!)', act: () => this.ringBell(), pri: 2 });
@@ -646,7 +763,7 @@ class Game {
       if (o.down) {
         const n = this.state?.items?.revive || 0;
         list.push({ x: o.pos.x, z: o.pos.z, r: 3.2, icon: '🧪', short: 'Revive', label: n ? `Revive ${o.name} with a Revive Potion (🧪 ${n} left)` : `${o.name} needs a Revive Potion (brew one at the cauldron)`, act: () => this.net.send({ t: 'revive', id }), pri: 5 });
-      } else list.push({ x: o.pos.x, z: o.pos.z, r: 2.6, icon: '💜', short: 'Heart', label: `Send ${o.name} a heart`, act: () => this.doEmote('heart', id), pri: 0 });
+      } else if ((o.room || 0) === this.myRoom) list.push({ x: o.pos.x, z: o.pos.z, r: 2.6, icon: '💜', short: 'Heart', label: `Send ${o.name} a heart`, act: () => this.doEmote('heart', id), pri: 0 });
     }
     void st;
     return list;
@@ -735,7 +852,7 @@ class Game {
     return {
       hello: n('mayor'), harvest: ZONES.patch, wisps: ZONES.woods, potion: CAULDRON, candles: ZONES.graveyard, carve: CARVE_TABLE,
       riddle: n('wisp'), deal: n('count'), ritual: ZONES.circle, dance: DANCE_FLOOR, boss: BOSS_BELL, photo: PHOTO_BOOTH,
-      finale: ZONES.plaza,
+      finale: ZONES.plaza, manor: MANOR_DOOR, bear: ZONES.circle,
     }[id];
   }
 
@@ -767,6 +884,7 @@ class Game {
     if (!this.state) return null;
     if (['intro', 'fight', 'stunned'].includes(this.finaleState.state)) return QUESTS.find((x) => x.id === 'finale');
     if (this.boss.active() || this.bossState.state === 'intro') return QUESTS.find((x) => x.id === 'boss');
+    if (this.bearView.active() || this.bearState.state === 'intro') return QUESTS.find((x) => x.id === 'bear');
     const open = (q) => q && !this.state.quests[q.id]?.done && this.questTarget(q.id);
     const t = QUESTS.find((x) => x.id === this.tracked);
     return open(t) ? t : QUESTS.find(open) || null;
@@ -824,7 +942,15 @@ class Game {
     this.input.update();
 
     if (this.me) {
-      this.ctrl.speedBoost = this.downUntil ? 0 : (this.modUntil?.slow || 0) > now ? 0.4 : 1;
+      if (this.myRoom && !this.roomCam) {
+        this.roomCam = true;
+        this.ctrl.camPitch = 0.85;
+        this.ctrl.camDist = 11;
+        this.ctrl.camYaw = 0;
+      } else if (!this.myRoom) this.roomCam = false;
+      this.ctrl.speedBoost = this.downUntil ? 0 : (this.dashUntil || 0) > now ? 2.8 : (this.modUntil?.slow || 0) > now ? 0.4 : 1;
+      F.tickClassHud(this, now);
+      F.tickContest(this, now);
       if (this.downUntil) this.ui.setDown(true, (this.downUntil - now) / 1000);
       this.ctrl.update(dt);
       this.me.update(dt, t, this.camera);
@@ -858,14 +984,20 @@ class Game {
       // boss
       const inArena = Math.hypot(this.me.pos.x - ZONES.arena.x, this.me.pos.z - ZONES.arena.z) < ZONES.arena.r + 8;
       const inPlaza = Math.hypot(this.me.pos.x, this.me.pos.z) < ZONES.plaza.r + 8;
-      const spider = this.spiders.nearest(this.me.pos, 8);
-      this.ui.setAttack(!this.downUntil && ((this.boss.active() && inArena) || (this.finale.active() && inPlaza) || !!spider));
-      this.audio.boss = (this.boss.active() && inArena) || (this.finale.active() && inPlaza);
+      const inCircle = Math.hypot(this.me.pos.x - ZONES.circle.x, this.me.pos.z - ZONES.circle.z) < ZONES.circle.r + 8;
+      const duel = F.inDuelZone(this.me.pos, this);
+      if (duel && !this.duelTipped) {
+        this.duelTipped = true;
+        this.ui.toast('⚔️ Duel zone! While the Gourd King sleeps, you can throw candy at friends in the courtyard.', 'announce');
+      }
+      this.ui.setAttack(!this.downUntil && (!!this.pickTarget(8) || !!this.duelTarget()));
+      this.audio.boss = (this.boss.active() && inArena) || (this.finale.active() && inPlaza) || (this.bearView.active() && inCircle);
       const players = [this.me, ...this.others.values()].filter((c) => !c.down);
       const fighter = this.downUntil ? null : this.me;
       const hitKing = this.boss.update(t, dt, sNow, inArena ? fighter : null, players);
       const hitMayor = this.finale.update(t, dt, sNow, inPlaza ? fighter : null, players);
-      if (hitKing || hitMayor) {
+      const hitBear = this.bearView.update(t, dt, sNow, inCircle ? fighter : null, players);
+      if (hitKing || hitMayor || hitBear) {
         this.me.dizzy(2.4);
         this.audio.play('dizzy');
         this.net.send({ t: 'hurt', src: 'boss' });
@@ -883,13 +1015,18 @@ class Game {
       this.camera.lookAt(0, 2, 0);
       this.boss.update(t, dt, sNow, null, []);
       this.finale.update(t, dt, sNow, null, []);
+      this.bearView.update(t, dt, sNow, null, []);
       this.spiders.update(t, dt);
     }
 
     const renderT = sNow - 0.15;
     for (const [, o] of this.others) {
       o.interpolate(renderT);
-      o.update(dt, t, this.camera);
+      // people in another Gloom Manor room (or outside while you are in one) are not drawn
+      const vis = (o.room || 0) === this.myRoom;
+      o.root.visible = vis;
+      if (o.pet) o.pet.root.visible = vis && !o.down;
+      if (vis) o.update(dt, t, this.camera);
     }
     this.updateNpcs(dt, t, now);
     this.acts.update(t, dt, sNow, this.me?.pos);

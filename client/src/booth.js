@@ -94,6 +94,7 @@ function showLive() {
   $('#flip').classList.remove('hidden');
   $('#retake').classList.add('hidden');
   $('#use').classList.add('hidden');
+  $('#drawing').classList.add('hidden');
 }
 
 function showStill(blob) {
@@ -105,6 +106,7 @@ function showStill(blob) {
   $('#flip').classList.add('hidden');
   $('#retake').classList.remove('hidden');
   $('#use').classList.remove('hidden');
+  $('#drawing').classList.remove('hidden');
 }
 
 $('#snap').onclick = () => {
@@ -131,6 +133,20 @@ $('#file').onchange = (e) => {
   e.target.value = '';
 };
 $('#retake').onclick = showLive;
+// a drawing on paper (or a painted pumpkin) becomes the student's glowing pumpkin in the game
+$('#drawing').onclick = async () => {
+  if (!photoBlob || !selected) return;
+  $('#drawing').disabled = true;
+  try {
+    await api(`drawing?pid=${selected.pid}`, { method: 'POST', body: photoBlob, headers: { 'content-type': 'application/octet-stream' } });
+    $('#camnote').textContent = `🎃 Done! ${selected.name}'s drawing now glows in the plaza gallery, and it is the pumpkin they turn into.`;
+    showLive();
+  } catch (e) {
+    $('#camnote').textContent = `⚠️ Could not use the drawing: ${e.message}`;
+  } finally {
+    $('#drawing').disabled = false;
+  }
+};
 $('#use').onclick = async () => {
   if (!photoBlob || !selected) return;
   $('#busy').classList.remove('hidden');

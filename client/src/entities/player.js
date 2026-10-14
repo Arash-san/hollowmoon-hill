@@ -1,7 +1,8 @@
 // Local player movement (camera-relative), jumping, collisions against world circles, and the follow camera.
 import { THREE, clamp, damp } from '../engine/toon.js';
 import { groundY } from '../world/world.js';
-import { WORLD_RADIUS } from '../../../shared/world.js';
+import { islandR } from '../../../shared/terrain.js';
+import { ROOM } from '../../../shared/features.js';
 
 const WALK = 3.6, RUN = 7.2, JUMP = 7.4, GRAVITY = 21;
 
@@ -93,10 +94,16 @@ export class PlayerController {
         p.z = col.z + (dz / d) * min;
       }
     }
-    const r = Math.hypot(p.x, p.z);
-    if (r > WORLD_RADIUS) {
-      p.x *= WORLD_RADIUS / r;
-      p.z *= WORLD_RADIUS / r;
+    // the wavy coast is the edge of the world
+    // inside the Gloom Manor room: its walls are the edge
+    if (p.x > 300) {
+      p.x = Math.max(ROOM.x - ROOM.w / 2 + 0.8, Math.min(ROOM.x + ROOM.w / 2 - 0.8, p.x));
+      p.z = Math.max(ROOM.z - ROOM.d / 2 + 0.8, Math.min(ROOM.z + ROOM.d / 2 - 0.8, p.z));
+    }
+    const r = Math.hypot(p.x, p.z), edge = islandR(Math.atan2(p.z, p.x)) - 2;
+    if (p.x <= 300 && r > edge) {
+      p.x *= edge / r;
+      p.z *= edge / r;
     }
 
     c.speed = Math.hypot(this.vel.x, this.vel.z) / RUN;

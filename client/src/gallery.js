@@ -15,6 +15,7 @@ if (q.get('world')) {
   const stage = new Stage(document.body);
   const t0 = performance.now();
   const world = new World(stage.scene, stage.quality);
+  window.__world = world;
   window.__buildMs = performance.now() - t0;
   const [cx, cy, cz] = (q.get('cam') || '0,40,70').split(',').map(Number);
   const [ax, az] = (q.get('at') || '0,0').split(',').map(Number);

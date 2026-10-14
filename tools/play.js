@@ -14,7 +14,7 @@ const browser = await puppeteer.launch({
   defaultViewport: mobile ? { width: 1180, height: 820, deviceScaleFactor: 1, hasTouch: true, isMobile: true } : { width: +W, height: +H, deviceScaleFactor: 1 },
 });
 const page = await browser.newPage();
-await page.evaluateOnNewDocument(() => localStorage.setItem('hh-helped', '1'));
+await page.evaluateOnNewDocument(() => (localStorage.setItem('hh-helped', '1'), localStorage.setItem('hh-prophecy', '1')));
 const logs = [];
 page.on('console', (m) => m.type() !== 'warning' && logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.stack || e.message}`));
@@ -38,13 +38,20 @@ switch (scenario) {
     await tp(-9, 30.5, Math.PI + 0.4);
     await page.evaluate(() => window.__game.openNpc('count'));
     await sleep(300);
+    await sleep(2500); // let the greeting arrive first
+    await page.evaluate(() => {
+      const g = window.__game;
+      const orig = g.onNpc.bind(g);
+      g.onNpc = (m) => ((window.__reply = m.say), orig(m));
+    });
     await page.evaluate(() => window.__game.ui.handlers.talk('count', 'Good evening, Count! Your cape is the finest in all of Hollowmoon. Might I borrow 80 candy? I will repay you with interest after I defeat the Gourd King.'));
-    await page.waitForFunction(() => document.querySelectorAll('#dialog .msg.npc').length >= 2, { timeout: 30000 }).catch(() => logs.push('no npc reply'));
-    await sleep(800);
+    // the reply shows as a talk bubble over the Count's head (and is spoken by Kokoro)
+    await page.waitForFunction(() => window.__reply, { timeout: 30000 }).catch(() => logs.push('no npc reply'));
+    logs.push('reply: ' + (await page.evaluate(() => window.__reply)));
+    logs.push('bubble: ' + (await page.evaluate(() => window.__game.npcs.get('count')?.pages?.join(' | '))));
     const offer = await page.evaluate(() => document.querySelector('#dialog .offer:not(.hidden) span')?.textContent || 'no offer');
     logs.push('offer: ' + offer);
-    await page.evaluate(() => document.querySelector('#dialog .offer:not(.hidden) button')?.click());
-    await sleep(1200);
+    await sleep(600);
     break;
   }
   case 'pumpkins': {

@@ -67,11 +67,16 @@ export class BossView {
     this.A = BOSSES[id].center;
     const A = this.A;
     this.mayor = id === 'mayor';
+    this.bear = id === 'bear';
     this.state = { state: 'idle', hp: 1, maxHp: 1 };
     this.root = new THREE.Group();
     this.root.position.set(A.x, this.mayor ? 0.7 : 0, A.z);
     if (this.mayor) {
       this.root.scale.setScalar(1.35);
+      this.root.visible = false;
+    }
+    if (this.bear) {
+      this.root.scale.setScalar(0.85);
       this.root.visible = false;
     }
     scene.add(this.root);
@@ -92,6 +97,11 @@ export class BossView {
         col(tf(cyl(1.17, 1.17, 0.36, 24, true), { p: [0, R * 1.58 + 0.35, 0] }), '#7b4dff'),
         col(tf(torus(0.42, 0.06, 8, 24), { p: [0.95, R * 1.02, R * 0.88], r: [0, 0.35, 0] }), '#ffd23f'),
         col(tf(cyl(0.02, 0.02, 1.4, 4), { p: [1.3, R * 0.55, R * 0.8], r: [0, 0, 0.25] }), '#ffd23f'),
+      ] : this.bear ? [
+        // round bear ears and a snout
+        ...[-1, 1].flatMap((sx) => [col(tf(sphere(0.75, 14, 10), { p: [sx * 1.6, R * 1.45, 0], s: [1, 1, 0.6] }), '#e8590c'), col(tf(sphere(0.42, 12, 8), { p: [sx * 1.6, R * 1.45, 0.3], s: [1, 1, 0.5] }), '#ffcf8a')]),
+        col(tf(sphere(0.9, 14, 10), { p: [0, R * 0.62, R * 0.86], s: [1.2, 0.8, 0.7] }), '#ffcf8a'),
+        col(tf(sphere(0.32, 10, 8), { p: [0, R * 0.78, R * 1.2], s: [1.3, 0.9, 0.8] }), '#2a1622'),
       ] : [
         // crown
         col(tf(cyl(1.15, 1.25, 0.5, 16, true), { p: [0, R * 1.62, 0] }), '#ffd23f'),
@@ -105,7 +115,7 @@ export class BossView {
       const a = (i / 7) * Math.PI * 2 + 0.45;
       return col(tf(sphere(0.12, 8, 6), { p: [Math.sin(a) * 1.22, R * 1.62, Math.cos(a) * 1.22] }), ['#ff4f8b', '#2ec4b6', '#7b4dff'][i % 3]);
     })), glowMat);
-    this.gems.visible = !this.mayor;
+    this.gems.visible = !this.mayor && !this.bear;
     this.body.add(this.gems);
     this.faces = { angry: faceTexture('angry'), sleep: faceTexture('sleep'), dizzy: faceTexture('dizzy') };
     this.face = new THREE.Mesh(new THREE.SphereGeometry(R * 1.01, 32, 16, Math.PI / 2 - 0.95, 1.9, 0.3 * Math.PI, 0.5 * Math.PI), new THREE.MeshBasicMaterial({ map: this.faces.sleep, transparent: true, toneMapped: false }));
@@ -152,7 +162,7 @@ export class BossView {
     const mood = s.state === 'idle' || s.state === 'defeated' ? 'sleep' : s.state === 'stunned' ? 'dizzy' : 'angry';
     this.face.material.map = this.faces[mood];
     // the mayor only exists as a giant while the finale runs
-    if (this.mayor) this.root.visible = ['intro', 'fight', 'stunned', 'shield'].includes(s.state) || (s.state === 'defeated' && performance.now() - (this.defeatedAt || 0) < 4000);
+    if (this.mayor || this.bear) this.root.visible = ['intro', 'fight', 'stunned', 'shield'].includes(s.state) || (s.state === 'defeated' && performance.now() - (this.defeatedAt || 0) < 4000);
     if (s.state === 'defeated' && prev !== 'defeated') this.defeatedAt = performance.now();
     if (prev !== s.state) {
       if (s.state === 'intro') {
@@ -246,7 +256,7 @@ export class BossView {
   update(t, dt, serverNow, player, players) {
     const st = this.state.state;
     const A = this.A;
-    if (this.mayor && this.state.state === 'defeated' && this.root.visible && performance.now() - (this.defeatedAt || 0) > 4000) this.root.visible = false;
+    if ((this.mayor || this.bear) && this.state.state === 'defeated' && this.root.visible && performance.now() - (this.defeatedAt || 0) > 4000) this.root.visible = false;
     const R = 2.6;
     // body pose
     let y = 0, sq = 1;

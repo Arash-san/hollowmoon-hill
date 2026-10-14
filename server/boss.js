@@ -86,8 +86,9 @@ export class Boss {
     if (this.maxHp) {
       // keep the same fraction of health when more fighters arrive
       const frac = this.hp / this.maxHp;
-      this.maxHp = this.hpFor(this.fighters.size);
+      this.maxHp = this.hpFor(this.fighters.size) * (this.def.hpScale || 1);
       this.hp = this.maxHp * frac;
+      this.send(); // clients need the new maximum for the health bar
     }
   }
 
@@ -95,7 +96,7 @@ export class Boss {
     return Math.min(4, Math.max(1, this.fighters.size));
   }
 
-  hit(s, kind, id) {
+  hit(s, kind, id, mult = 1) {
     if (!['fight', 'shield', 'stunned'].includes(this.state) || !this.inArena(s)) return;
     const now = Date.now();
     if (now - (this.lastHit.get(s.sid) || 0) < HIT_GAP) return;
@@ -113,7 +114,7 @@ export class Boss {
     }
     if (this.state === 'shield') return this.game.toast(s, 'The Gourd King is shielded! Light the braziers together!');
     // the Fire Charm (from the Summoning) turns thrown candy into fireballs
-    const dmg = (this.state === 'stunned' ? DAMAGE * 2 : DAMAGE) * (s.player.items?.fire ? 1.5 : 1);
+    const dmg = Math.round((this.state === 'stunned' ? DAMAGE * 2 : DAMAGE) * (s.player.items?.fire ? 1.5 : 1) * mult);
     this.hp = Math.max(0, this.hp - dmg);
     this.fighters.get(s.sid).hits++;
     this.game.broadcast({ t: 'bossHit', b: this.id, by: s.sid, hp: Math.round(this.hp), dmg });

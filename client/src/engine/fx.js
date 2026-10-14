@@ -1,5 +1,6 @@
 // Pooled sprite particles: emoji bursts (hearts, notes, zzz), confetti, sparkles, candy pops and floating text.
 import { THREE, glowTexture } from './toon.js';
+import { EMOJI_ICON, iconImage, leadIcon, stripEmoji } from '../icons.js';
 
 const texCache = new Map();
 export function emojiTexture(ch, size = 96) {
@@ -8,6 +9,15 @@ export function emojiTexture(ch, size = 96) {
     const c = document.createElement('canvas');
     c.width = c.height = size;
     const x = c.getContext('2d');
+    // the game's own icon when one exists (icons.js); emoji only as a fallback
+    const img = EMOJI_ICON[ch] && iconImage(EMOJI_ICON[ch]);
+    if (img && img.complete && img.naturalWidth) {
+      x.drawImage(img, size * 0.06, size * 0.06, size * 0.88, size * 0.88);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      texCache.set(key, t);
+      return t;
+    }
     x.textAlign = 'center';
     x.textBaseline = 'middle';
     x.font = `${size * 0.78}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
@@ -20,21 +30,27 @@ export function emojiTexture(ch, size = 96) {
 }
 
 export function textTexture(text, { color = '#fff', stroke = '#2a1440', font = '700 44px Fredoka, sans-serif', pad = 14 } = {}) {
+  // emoji in floating text ("+5 🍬") become the game's icon after the words
+  const lead = leadIcon(text);
+  const img = lead && iconImage(lead);
+  const words = lead ? stripEmoji(text) : text;
   const c = document.createElement('canvas');
   const x = c.getContext('2d');
   x.font = font;
-  const w = Math.ceil(x.measureText(text).width) + pad * 2;
+  const tw = Math.ceil(x.measureText(words).width), iw = img ? 52 : 0;
+  const w = tw + iw + pad * 2;
   c.width = w;
   c.height = 64;
   x.font = font;
-  x.textAlign = 'center';
+  x.textAlign = 'left';
   x.textBaseline = 'middle';
   x.lineJoin = 'round';
   x.lineWidth = 9;
   x.strokeStyle = stroke;
-  x.strokeText(text, w / 2, 34);
+  x.strokeText(words, pad, 34);
   x.fillStyle = color;
-  x.fillText(text, w / 2, 34);
+  x.fillText(words, pad, 34);
+  if (img && img.complete) x.drawImage(img, pad + tw + 4, 8, 48, 48);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.userData = { aspect: w / 64 };

@@ -14,6 +14,7 @@ import { randomAvatar } from '../shared/avatar.js';
 import { transcribe, voiceEnabled } from './voice.js';
 import { PHOTO_BOOTH, dist2 } from '../shared/world.js';
 import { clip, ttsEnabled } from './tts.js';
+import { drawingToCarving } from './drawing.js';
 
 const PORT = Number(process.env.PORT || 8830);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -83,9 +84,17 @@ const server = http.createServer(async (req, res) => {
         const photo = await readBody(req, 12 * 1024 * 1024);
         const result = await queueAvatar(() => designAvatar(photo, pid));
         // the photo itself is not kept: only the avatar design is stored
-        const player = game.setPhotoAvatar(pid, result.avatar);
+        const player = game.setPhotoAvatar(pid, result.avatar, result.raw?.costume);
         console.log(`avatar for ${player?.name} in ${result.ms} ms`);
         return sendJson(res, 200, { avatar: result.avatar, ms: result.ms, name: player?.name });
+      }
+      // a photo of a pumpkin drawn on paper becomes the player's glowing carving
+      if (p === '/api/booth/drawing' && req.method === 'POST') {
+        const pid = url.searchParams.get('pid');
+        if (!game.state.players[pid]) return sendJson(res, 404, { error: 'unknown player' });
+        const png = await drawingToCarving(await readBody(req, 12 * 1024 * 1024));
+        const c = game.setCarvingImage(pid, png);
+        return sendJson(res, 200, { ok: true, carving: c?.id });
       }
       if (p === '/api/booth/reset' && req.method === 'POST') {
         const pid = url.searchParams.get('pid');
@@ -155,6 +164,19 @@ const server = http.createServer(async (req, res) => {
       }
     }
     // ----- self-service photo booth: a player standing in the booth tent sends their own photo -----
+    if (p === '/api/drawing' && req.method === 'POST') {
+      // the in-game booth: a player photographs their own paper pumpkin drawing
+      const token = String(req.headers['x-hh-token'] || '');
+      const pid = token.length >= 16 ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 20) : '';
+      const s = game.online().find((x) => x.pid === pid);
+      if (!s) return sendJson(res, 403, { error: 'Join the game first.' });
+      if (dist2(s, PHOTO_BOOTH) > 81) return sendJson(res, 403, { error: 'Step into the Photo Booth first.' });
+      if (Date.now() - (s.drawingAt || 0) < 10000) return sendJson(res, 429, { error: 'One moment, the booth is still working.' });
+      s.drawingAt = Date.now();
+      const png = await drawingToCarving(await readBody(req, 8 * 1024 * 1024));
+      const c = game.setCarvingImage(pid, png);
+      return sendJson(res, 200, { ok: true, carving: c?.id });
+    }
     if (p === '/api/selfie' && req.method === 'POST') {
       const token = String(req.headers['x-hh-token'] || '');
       const pid = token.length >= 16 ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 20) : '';
@@ -172,7 +194,7 @@ const server = http.createServer(async (req, res) => {
         pl.selfies = (pl.selfies || 0) + 1;
         const result = await queueAvatar(() => designAvatar(photo, pid));
         // the photo itself is not kept: only the avatar design is stored
-        game.setPhotoAvatar(pid, result.avatar);
+        game.setPhotoAvatar(pid, result.avatar, result.raw?.costume);
         console.log(`selfie avatar for ${pl.name} in ${result.ms} ms`);
         return sendJson(res, 200, { ok: true, title: result.avatar.title });
       } catch (e) {

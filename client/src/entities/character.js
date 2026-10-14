@@ -6,6 +6,7 @@ import { Avatar } from '../avatar/builder.js';
 import { Animator } from '../avatar/animator.js';
 import { Pet } from '../avatar/pets.js';
 import { emojiTexture } from '../engine/fx.js';
+import { iconImage, stripEmoji } from '../icons.js';
 import { groundY } from '../world/world.js';
 
 function plateTexture(name, title, color = '#ffe066', likes = 0) {
@@ -13,7 +14,7 @@ function plateTexture(name, title, color = '#ffe066', likes = 0) {
   const x = c.getContext('2d');
   const font1 = '700 40px Fredoka, sans-serif', font2 = '500 26px Fredoka, sans-serif';
   x.font = font1;
-  const heart = likes ? `  💜${likes}` : '';
+  const heart = likes ? `   ${likes}` : '';
   const w1 = x.measureText(name + heart).width;
   x.font = font2;
   const w2 = title ? x.measureText(title).width : 0;
@@ -28,6 +29,12 @@ function plateTexture(name, title, color = '#ffe066', likes = 0) {
   x.strokeText(name + heart, w / 2, 44);
   x.fillStyle = color;
   x.fillText(name + heart, w / 2, 44);
+  if (likes) {
+    // the heart icon in front of the like count
+    const img = iconImage('heart');
+    const nw = x.measureText(name + ' ').width, full = x.measureText(name + heart).width;
+    if (img?.complete) x.drawImage(img, w / 2 - full / 2 + nw - 2, 14, 34, 34);
+  }
   if (title) {
     x.font = font2;
     x.lineWidth = 8;
@@ -175,7 +182,7 @@ export class Character {
       this.root.remove(this.bubble);
       this.bubble.material.map.dispose();
     }
-    const tex = bubbleTexture(text, talk);
+    const tex = bubbleTexture(stripEmoji(text) || text, talk);
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: !talk }));
     const h = 0.0068 * tex.userData.h;
     s.scale.set(h * tex.userData.aspect, h, 1);
@@ -185,6 +192,12 @@ export class Character {
     this.bubble = s;
     this.bubbleUntil = performance.now() + secs * 1000;
     this.root.add(s);
+  }
+
+  hideBubble() {
+    clearTimeout(this.pageTimer);
+    this.bubbleUntil = 0;
+    if (this.bubble) this.bubble.visible = false;
   }
 
   // Conversation line: long replies are split into bubble pages that follow each other, and the bubble stays

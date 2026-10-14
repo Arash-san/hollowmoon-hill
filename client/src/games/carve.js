@@ -1,10 +1,14 @@
 // Jack of All Lanterns: draw on a pumpkin with finger or mouse; the cut-outs glow in the plaza gallery for everyone.
+// Contest mode: a target design shows as a pale outline, a timer runs, and the score is how well the carving
+// matches the design (intersection over union of the two masks).
+import { stencilCanvas } from './stencils.js';
+
 const SIZE = 512;
 
-export function carveGame(ui, audio, onDone) {
+export function carveGame(ui, audio, onDone, { stencil = null, until = 0 } = {}) {
   const body = ui.modal(`<div class="mg">
-    <h2>Carve your Pumpkin</h2>
-    <p class="status">Draw a face! Everything you carve will glow in the plaza gallery.</p>
+    <h2>${stencil ? 'Carve the Design!' : 'Carve your Pumpkin'}</h2>
+    <p class="status">${stencil ? 'Follow the pale design as closely as you can. <b class="left"></b>' : 'Draw a face! Everything you carve will glow in the plaza gallery.'}</p>
     <div class="carve-wrap">
       <canvas id="carve-canvas" width="${SIZE}" height="${SIZE}"></canvas>
       <div class="carve-tools">
@@ -28,6 +32,18 @@ export function carveGame(ui, audio, onDone) {
   cx.lineJoin = 'round';
   cx.strokeStyle = cx.fillStyle = '#fff';
   let width = 14, drawing = false, last = null;
+  const target = stencil ? stencilCanvas(stencil) : null;
+  // the target design as a pale overlay, drawn once
+  let outline = null;
+  if (target) {
+    outline = document.createElement('canvas');
+    outline.width = outline.height = SIZE;
+    const ox = outline.getContext('2d');
+    ox.drawImage(target, 0, 0);
+    ox.globalCompositeOperation = 'source-in';
+    ox.fillStyle = 'rgba(255,244,227,.3)';
+    ox.fillRect(0, 0, SIZE, SIZE);
+  }
   const history = [];
 
   function render() {
@@ -58,11 +74,38 @@ export function carveGame(ui, audio, onDone) {
     lg.addColorStop(1, '#ffb000');
     gx.fillStyle = lg;
     gx.fillRect(0, 0, SIZE, SIZE);
+    if (outline) ctx.drawImage(outline, 0, 0);
     ctx.save();
     ctx.shadowColor = '#ffd23f';
     ctx.shadowBlur = 18;
     ctx.drawImage(glow, 0, 0);
     ctx.restore();
+  }
+
+  // how well the carving matches the target: intersection over union of the two masks (0-100)
+  const score = () => {
+    if (!target) return 0;
+    const n = 128, a = document.createElement('canvas'), b = document.createElement('canvas');
+    a.width = a.height = b.width = b.height = n;
+    a.getContext('2d').drawImage(cut, 0, 0, n, n);
+    b.getContext('2d').drawImage(target, 0, 0, n, n);
+    const da = a.getContext('2d').getImageData(0, 0, n, n).data, db = b.getContext('2d').getImageData(0, 0, n, n).data;
+    let inter = 0, union = 0;
+    for (let i = 3; i < da.length; i += 4) {
+      const ca = da[i] > 80, cb = db[i] > 80;
+      if (ca && cb) inter++;
+      if (ca || cb) union++;
+    }
+    return union ? Math.round((inter / union) * 100) : 0;
+  };
+  let timer = 0;
+  if (until) {
+    timer = setInterval(() => {
+      const left = Math.ceil((until - performance.now()) / 1000);
+      const el = body.querySelector('.left');
+      if (el) el.textContent = `${Math.max(0, left)} s left`;
+      if (left <= 0) finish(true);
+    }, 250);
   }
 
   const pos = (e) => {
@@ -154,7 +197,13 @@ export function carveGame(ui, audio, onDone) {
       cx.clearRect(0, 0, SIZE, SIZE);
       render();
     }
-    if (b.dataset.done) {
+    if (b.dataset.done) finish(false);
+  };
+  function finish(timeUp) {
+    clearInterval(timer);
+    // the player may have closed the carving already (or another window took its place)
+    if (finish.done || !canvas.isConnected) return;
+    {
       // only the cut-out mask is uploaded (small PNG); the world tints and lights it
       const small = document.createElement('canvas');
       small.width = small.height = 256;
@@ -162,14 +211,15 @@ export function carveGame(ui, audio, onDone) {
       const data = cut.getContext('2d').getImageData(0, 0, SIZE, SIZE).data;
       let carved = 0;
       for (let i = 3; i < data.length; i += 16) if (data[i] > 0) carved++;
-      if (carved < 200) {
+      if (carved < 200 && !timeUp) {
         body.querySelector('.status').textContent = 'Carve a little more first! Try the stamps for a quick face.';
         audio.play('wrong');
         return;
       }
+      finish.done = true;
       ui.closeModal();
-      onDone(small.toDataURL('image/png'));
+      if (carved >= 50) onDone(small.toDataURL('image/png'), score());
     }
-  };
+  }
   render();
 }

@@ -12,7 +12,8 @@
 <body>
 <div id="app"></div>
 
-<div id="loading"><div class="pumpkin-spin">🎃</div><p>Carving the pumpkins…</p></div>
+<!-- icons: <i data-ic="name"> placeholders are swapped for the game's SVG icons at start (client/src/icons.js) -->
+<div id="loading"><div class="pumpkin-spin"><i data-ic="pumpkin"></i></div><p>Carving the pumpkins…</p></div>
 
 <section id="login" class="hidden">
   <div class="login-card">
@@ -20,71 +21,78 @@
     <p class="sub">LLM Engineering Club · Halloween Night</p>
     <label for="name-input">What should we call you?</label>
     <input id="name-input" maxlength="16" autocomplete="nickname" placeholder="Your name" enterkeyhint="go">
-    <button id="play-btn" class="btn big orange">Enter the Hill 🎃</button>
-    <p class="fine">Do quests, catch wisps, sweet-talk the locals and beat the Gourd King with friends.<br>Treat Tickets you earn here are real candy at the club table!</p>
+    <button id="play-btn" class="btn big orange"><span>Enter the Hill</span><i data-ic="pumpkin"></i></button>
+    <p class="fine">Do quests, catch wisps, talk with the locals and save the town with friends.<br>Treat Tickets you earn here are real candy at the club table!</p>
   </div>
 </section>
 
 <div id="hud" class="hidden">
-  <div id="me-card">
-    <canvas id="me-face" width="72" height="72"></canvas>
+  <div id="me-card" class="panel">
+    <div class="face-ring"><canvas id="me-face" width="72" height="72"></canvas><span id="me-class" class="class-badge hidden"></span></div>
     <div class="me-text"><b id="me-name"></b><span id="me-title"></span></div>
     <div class="pills">
-      <button class="pill" id="candy-pill" title="Candy">🍬 <b id="candy">0</b></button>
-      <button class="pill gold" id="ticket-pill" title="Treat Tickets">🎟️ <b id="tickets">0</b></button>
-      <span class="pill item hidden" id="revive-pill" title="Revive Potions: use one on a friend who turned into a pumpkin">🧪 <b id="revives">0</b></span>
-      <span class="pill item hidden" id="fire-pill" title="Fire Charm: your candy throws are fireballs">🔥</span>
+      <button class="stat" id="candy-pill" title="Candy"><i data-ic="candy"></i><b id="candy">0</b></button>
+      <button class="stat gold" id="ticket-pill" title="Treat Tickets"><i data-ic="ticket"></i><b id="tickets">0</b></button>
+      <span class="stat hidden" id="revive-pill" title="Revive Potions: use one on a friend who turned into a pumpkin"><i data-ic="revive"></i><b id="revives">0</b></span>
+      <span class="stat hidden" id="fire-pill" title="Fire Charm: your candy throws are fireballs"><i data-ic="fire"></i></span>
     </div>
-    <div id="hp" title="Health"><div class="fill"></div><span>❤️ <b id="hp-n">100</b></span></div>
+    <div id="hp" title="Health"><i data-ic="heart"></i><div class="track"><div class="fill"></div></div><b id="hp-n">100</b></div>
   </div>
   <div id="top-right">
-    <span class="pill" id="online-pill">👥 <b id="online">1</b></span>
-    <button class="icon-btn" id="quests-btn" title="Quests (Tab)">📜</button>
-    <button class="icon-btn" id="story-btn" title="The prophecy and your clues (J)">📖<i id="story-dot" class="hidden"></i></button>
-    <button class="icon-btn" id="map-btn" title="Map (M)">🗺️</button>
-    <button class="icon-btn" id="sound-btn" title="Sound">🔊</button>
-    <button class="icon-btn" id="help-btn" title="Help">❔</button>
+    <span class="chip" id="online-pill" title="Players online"><i data-ic="users"></i><b id="online">1</b></span>
+    <button class="icon-btn" id="quests-btn" title="Checklist (Tab)"><i data-ic="scroll"></i></button>
+    <button class="icon-btn" id="story-btn" title="The prophecy and your clues (J)"><i data-ic="book"></i><em id="story-dot" class="hidden"></em></button>
+    <button class="icon-btn" id="map-btn" title="Map (M)"><i data-ic="map"></i></button>
+    <button class="icon-btn" id="sound-btn" title="Sound"><i data-ic="sound"></i></button>
+    <button class="icon-btn" id="help-btn" title="How to play"><i data-ic="help"></i></button>
   </div>
-  <button id="minimap" title="Map (M)" aria-label="Open the map"><canvas width="360" height="360"></canvas></button>
+  <button id="minimap" title="Map (M)" aria-label="Open the map"><canvas width="360" height="360"></canvas><span class="mm-ring"></span></button>
   <div id="booth-banner" class="hidden"></div>
-  <div id="quest-panel"></div>
-  <div id="down-veil" class="hidden"><b>🎃 You turned into a pumpkin!</b><span>A friend with a 🧪 Revive Potion can save you, or wait <b id="down-secs">60</b> s for the moonlight.</span></div>
+  <div id="quest-panel" class="panel"></div>
+  <div id="down-veil" class="hidden"><i data-ic="pumpkin"></i><b>You turned into a pumpkin!</b><span>A friend with a Revive Potion can save you, or wait <b id="down-secs">60</b> s for the moonlight.</span></div>
   <div id="hurt-flash"></div>
-  <div id="boss-bar" class="hidden"><div class="boss-name">👑🎃 The Gourd King</div><div class="bar"><div class="fill"></div></div><div class="boss-sub"></div></div>
-  <div id="activity" class="hidden"></div>
+  <div id="team-flash" class="hidden"><b></b><span>Hold your screen up so your team can find you!</span></div>
+  <div id="top-center">
+    <div id="boss-bar" class="hidden"><div class="boss-name"><i data-ic="crown"></i><span>The Gourd King</span></div><div class="bar"><div class="fill"></div></div><div class="boss-sub"></div></div>
+    <div id="contest-panel" class="panel hidden"></div>
+    <div id="room-panel" class="panel hidden"></div>
+    <div id="activity" class="hidden"></div>
+    <div id="toasts"></div>
+  </div>
   <div id="prompt" class="hidden"></div>
-  <div id="compass" class="hidden"><span class="arrow">➤</span><span class="t"></span></div>
+  <div id="compass" class="hidden"><span class="arrow"><svg viewBox="0 0 24 24"><path d="M4 12 H18 M12 5 L19 12 L12 19" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="t"></span></div>
   <div id="chat-log"></div>
-  <div id="chat-box" class="hidden">
+  <div id="chat-box" class="hidden panel">
     <div class="quick"></div>
     <form id="chat-form"><input id="chat-input" maxlength="140" placeholder="Say something nice…" autocomplete="off" enterkeyhint="send"><button class="btn orange">Send</button></form>
   </div>
   <div id="actions">
-    <button class="act" id="act-chat" title="Chat (Enter)">💬</button>
-    <button class="act" id="act-emote" title="Emotes (Q)">😄</button>
-    <button class="act big hidden" id="act-attack" title="Throw candy (R)">🍬</button>
-    <button class="act big" id="act-use" title="Interact (E)">✋</button>
-    <button class="act big" id="act-jump" title="Jump (Space)">⤒</button>
+    <button class="act" id="act-lantern" title="Show your team colour (L)"><i data-ic="lantern"></i></button>
+    <button class="act" id="act-chat" title="Chat (Enter)"><i data-ic="chat"></i></button>
+    <button class="act" id="act-emote" title="Emotes (Q)"><i data-ic="smile"></i></button>
+    <button class="act big hidden" id="act-special" title="Class power (F)"><i data-ic="fire"></i><span class="cd"></span><span class="lbl">Power</span></button>
+    <button class="act big hidden" id="act-attack" title="Throw candy (R)"><i data-ic="throw"></i><span class="lbl">Throw</span></button>
+    <button class="act big" id="act-use" title="Interact (E)"><i data-ic="hand"></i></button>
+    <button class="act big" id="act-jump" title="Jump (Space)"><i data-ic="jump"></i></button>
   </div>
-  <div id="emote-wheel" class="hidden"></div>
-  <div id="toasts"></div>
+  <div id="emote-wheel" class="hidden panel"></div>
   <div id="banner"></div>
 </div>
 
 <aside id="dialog" class="hidden">
-  <header><span class="npc-icon"></span><div><b class="npc-name"></b><small class="npc-sub"></small></div><button class="x" aria-label="Close">✕</button></header>
+  <header><span class="npc-icon"></span><div><b class="npc-name"></b><small class="npc-sub"></small></div><button class="x" aria-label="Close"><i data-ic="close"></i></button></header>
   <div class="offer hidden"></div>
   <div class="extras"></div>
   <div class="talk">
-    <button type="button" class="mic" hidden aria-label="Hold to talk"><span class="ic">🎙️</span><span class="lb">Hold to talk</span></button>
+    <button type="button" class="mic" hidden aria-label="Hold to talk"><span class="ic"><i data-ic="mic"></i></span><span class="lb">Hold to talk</span></button>
     <form class="hidden"><input maxlength="220" placeholder="Talk to them… try to haggle!" autocomplete="off" enterkeyhint="send"><button class="btn orange">Say</button></form>
-    <button type="button" class="kbd" title="Type instead">⌨️</button>
+    <button type="button" class="kbd" title="Type instead"><i data-ic="keyboard"></i></button>
   </div>
   <div class="chips"></div>
   <div class="talk-hint"></div>
 </aside>
 
-<div id="modal" class="hidden"><div class="modal-card"><button class="x" aria-label="Close">✕</button><div class="modal-body"></div></div></div>
+<div id="modal" class="hidden"><div class="modal-card"><button class="x" aria-label="Close"><i data-ic="close"></i></button><div class="modal-body"></div></div></div>
 
 <script type="module" src="%JS%"></script>
 </body>
