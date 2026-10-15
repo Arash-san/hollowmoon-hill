@@ -8,6 +8,8 @@ The LLM Engineering Club Halloween game. It is a cozy 3D multiplayer town in the
 powershell -ExecutionPolicy Bypass -File tools\start.ps1   # Ollama on GPU 1 (:11445), Kokoro voices (:8834), game server (:8830)
 ```
 
+It picks the RTX 5090 with the most free memory (set `HH_GPU=<nvidia-smi index>` to choose) and keeps Ollama on CUDA only. The scheduled task "Hollowmoon Hill" runs it at logon; `tools\install-boot-task.ps1` (one UAC prompt) makes it also run at boot, before anyone signs in.
+
 First time setup on a new machine:
 
 ```powershell
