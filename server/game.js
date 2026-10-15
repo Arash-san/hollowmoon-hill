@@ -29,6 +29,7 @@ const SPIDER_COUNT = 8;
 const SPIDER_SPEED = 4.2; // between walking (3.6) and running (7.2)
 const HURT = { boss: 20, minion: 10 };
 // spiders live in the dark parts of town; the plaza and market are safe (except during the finale)
+const NPC_SAFE = Object.values(NPCS);
 const SPIDER_HOMES = [ZONES.graveyard, ZONES.woods, ZONES.woods, ZONES.patch, ZONES.circle, ZONES.lake, ZONES.graveyard, ZONES.cottage];
 const SAFE = [ZONES.plaza, ZONES.market];
 const KEYS = keys();
@@ -472,17 +473,26 @@ export class Game {
     if (s.busy || now() - s.lastTalk < 900) return;
     s.busy = true;
     s.lastTalk = now();
+    s.safeUntil = now() + 20000; // spiders leave you alone while you talk
     if (id === 'mayor') this.completeQuest(s, 'hello');
     const hist = (p.history[id] ||= []);
+    const mem = (p.mem ||= {});
     const ctx = {
-      name: p.name, title: p.avatar.title, candy: p.candy, pumpkins: p.pumpkins, wisps: p.wisps, debt: id === 'count' && p.debt ? p.debt.due : 0,
-      trust: p.trust[id] || 0, riddle: RIDDLES[p.riddle % RIDDLES.length],
+      name: p.name, title: p.avatar.title, cls: p.cls, candy: p.candy, pumpkins: p.pumpkins, wisps: p.wisps, debt: id === 'count' && p.debt ? p.debt.due : 0,
+      trust: p.trust[id] || 0, riddle: RIDDLES[p.riddle % RIDDLES.length], quests: p.quests, notes: mem[id] || [],
+      gossip: Object.entries(mem).filter(([k, v]) => k !== id && NPCS[k] && v.length).slice(0, 4).map(([k, v]) => `${NPCS[k].name}: ${v[v.length - 1]}`),
     };
+    const say = this.lineSender(s, id);
     try {
-      const r = await npcReply(id, ctx, hist, text);
+      const r = await npcReply(id, ctx, hist, text, say.update);
       p.trust[id] = Math.max(-5, Math.min(5, (p.trust[id] || 0) + r.mood));
       hist.push({ role: 'user', content: text }, { role: 'assistant', content: r.say });
-      if (hist.length > 12) hist.splice(0, hist.length - 12);
+      if (hist.length > 40) hist.splice(0, hist.length - 40);
+      if (r.remember.length) {
+        const notes = (mem[id] ||= []);
+        for (const n of r.remember) if (!notes.some((x) => x.toLowerCase() === n.toLowerCase())) notes.push(n);
+        if (notes.length > 12) notes.splice(0, notes.length - 12);
+      }
       let offer = validateOffer(id, r.offer, ctx, r.say);
       if (offer?.kind === 'gift') {
         // gifts arrive at once, but each NPC only gives one gift per player every 5 minutes
@@ -494,53 +504,91 @@ export class Game {
         offer = null;
       }
       s.offer = offer ? { npc: id, ...offer, at: now() } : null;
-      this.send(s, { t: 'npc', npc: id, say: r.say, offer: offer ? { label: offer.label, kind: offer.kind, price: offer.price || 0 } : null, trust: p.trust[id] });
-      this.voiceLine(s, id, r.say);
+      const guide = r.guide && !p.quests[r.guide]?.done ? r.guide : null;
+      this.send(s, { t: 'npc', npc: id, rid: say.rid, n: say.count(), say: r.say, offer: offer ? { label: offer.label, kind: offer.kind, price: offer.price || 0 } : null, trust: p.trust[id], guide });
+      if (r.emote) this.broadcast({ t: 'npcEmote', npc: id, e: r.emote });
       if (r.riddleSolved && npc.riddles) {
         p.riddle = (p.riddle + 1 + Math.floor(Math.random() * 3)) % RIDDLES.length;
-        p.history[id] = [];
         const first = this.completeQuest(s, 'riddle');
         if (!first) this.addCandy(s, 5, 'riddle');
       }
       this.dirty();
     } catch (e) {
       console.error('npc error', e.message);
-      this.send(s, { t: 'npc', npc: id, say: `*${npc.name} seems lost in thought... try again in a moment.*`, offer: null });
+      const line = `*${npc.name} seems lost in thought... try again in a moment.*`;
+      say.update(line, true);
+      this.send(s, { t: 'npc', npc: id, rid: say.rid, n: say.count(), say: line, offer: null });
     } finally {
       s.busy = false;
     }
   }
 
-  // ---------- NPC voices ----------
-  async voiceLine(s, npcId, text) {
-    const v = NPCS[npcId]?.voice;
-    if (!v || !ttsEnabled()) return;
-    const seq = (s.voiceSeq = (s.voiceSeq || 0) + 1); // a newer reply cancels the rest of an older one
-    let i = 0;
-    for (const line of sentences(text)) {
-      if (seq !== s.voiceSeq || !s.player) return;
-      try {
-        const audio = await speak(line, v.id, v.speed);
-        if (audio && seq === s.voiceSeq) this.send(s, { t: 'npcVoice', npc: npcId, audio, i: i++, rate: v.rate || 1 });
-      } catch (e) {
-        console.error('tts', e.message);
-        return;
+  // Sends an NPC reply to one player sentence by sentence as the model writes it: each sentence goes out as text
+  // (npcLine) and, in parallel, as a voice clip (npcVoice, same rid and index). The browser shows each sentence in the
+  // speech bubble exactly while its clip plays, so text and voice stay in step. A newer reply (rid) replaces this one.
+  lineSender(s, npcId) {
+    const npc = NPCS[npcId];
+    const rid = (s.rid = (s.rid || 0) + 1);
+    const voice = !!npc?.voice && ttsEnabled();
+    let consumed = 0, hold = '', n = 0, finished = false;
+    const emit = (line) => {
+      line = line.replace(/\s+/g, ' ').trim();
+      if (!line || rid !== s.rid) return;
+      const i = n++;
+      const spoken = line.replace(/\*[^*]*\*/g, ' ').replace(/\p{Extended_Pictographic}/gu, '').trim();
+      const v = voice && /[a-z0-9]/i.test(spoken);
+      this.send(s, { t: 'npcLine', npc: npcId, rid, i, text: line, voice: v });
+      if (v) {
+        speak(spoken, npc.voice.id, npc.voice.speed)
+          .then((audio) => audio && rid === s.rid && this.send(s, { t: 'npcVoice', npc: npcId, rid, i, audio, rate: npc.voice.rate || 1 }))
+          .catch((e) => {
+            console.error('tts', e.message);
+            if (rid === s.rid) this.send(s, { t: 'npcVoice', npc: npcId, rid, i, audio: null });
+          });
       }
-    }
+    };
+    const update = (text, done) => {
+      if (finished) return;
+      let rest = text.slice(consumed);
+      let m;
+      // a sentence ends at . ! ? or … followed by a space; very short ones wait to be joined with the next
+      while ((m = /^[\s\S]*?[.!?…]+["')\]*]*\s+/.exec(rest))) {
+        consumed += m[0].length;
+        rest = rest.slice(m[0].length);
+        hold += m[0];
+        if (hold.trim().length >= 28) {
+          emit(hold);
+          hold = '';
+        }
+      }
+      if (done) {
+        finished = true;
+        emit(hold + rest);
+        hold = '';
+      }
+    };
+    return { rid, update, count: () => n };
   }
 
-  // Greetings are the same every time, so each NPC's is made once and reused.
+  // Greetings are the same every time, so each NPC's voice clips are made once and reused.
   async greet(s, npcId) {
     const npc = NPCS[npcId];
-    if (!npc?.voice || !ttsEnabled() || dist2(s, npc) > 144) return;
-    s.voiceSeq = (s.voiceSeq || 0) + 1;
+    if (!npc || dist2(s, npc) > 144) return;
+    s.safeUntil = now() + 20000;
+    const rid = (s.rid = (s.rid || 0) + 1);
+    const lines = sentences(npc.greeting);
+    const voice = !!npc.voice && ttsEnabled();
+    lines.forEach((text, i) => this.send(s, { t: 'npcLine', npc: npcId, rid, i, text, voice }));
+    this.send(s, { t: 'npc', npc: npcId, rid, n: lines.length, say: npc.greeting, greet: true });
+    if (!voice) return;
     this.greetings ||= {};
     try {
-      const ids = (this.greetings[npcId] ||= await Promise.all(sentences(npc.greeting).map((l) => speak(l, npc.voice.id, npc.voice.speed))));
-      const seq = s.voiceSeq;
-      ids.forEach((audio, i) => audio && seq === s.voiceSeq && this.send(s, { t: 'npcVoice', npc: npcId, audio, i, rate: npc.voice.rate || 1 }));
+      const ids = (this.greetings[npcId] ||= await Promise.all(lines.map((l) => speak(l, npc.voice.id, npc.voice.speed))));
+      ids.forEach((audio, i) => rid === s.rid && this.send(s, { t: 'npcVoice', npc: npcId, rid, i, audio, rate: npc.voice.rate || 1 }));
     } catch (e) {
+      delete this.greetings[npcId];
       console.error('tts greet', e.message);
+      lines.forEach((_, i) => rid === s.rid && this.send(s, { t: 'npcVoice', npc: npcId, rid, i, audio: null }));
     }
   }
 
@@ -1025,6 +1073,8 @@ export class Game {
         for (const s of players) {
           if (s.down || s.room || this.modded(s.player, 'block')) continue;
           if (!sp.swarm && !finale && SAFE.some((z) => dist2(s, z) < z.r * z.r)) continue;
+          // nobody gets bitten in the middle of a conversation: near a character, or just after talking to one
+          if ((s.safeUntil || 0) > t || NPC_SAFE.some((n) => dist2(s, n) < 64)) continue;
           const d = dist2(sp, s);
           if (d < bd) (bd = d), (best = s);
         }

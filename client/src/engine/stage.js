@@ -44,6 +44,7 @@ export class Stage {
     this.camera.aspect = w / h;
     // portrait tablets: widen the view a bit so the world does not feel cramped
     this.camera.fov = w < h ? 62 : 50;
+    if (this.shift) this.camera.setViewOffset(w, h, this.shift, 0, w, h);
     this.camera.updateProjectionMatrix();
   }
 
@@ -63,7 +64,20 @@ export class Stage {
     }
   }
 
+  // Slide the picture sideways (px; positive moves the world left) so a side panel does not cover what matters,
+  // e.g. you and the character you talk to stay in view next to the NPC dialog.
+  setShift(px) {
+    this.shiftTarget = px;
+  }
+
   render() {
+    const target = this.shiftTarget || 0;
+    if (Math.abs((this.shift || 0) - target) > 0.5) {
+      this.shift = (this.shift || 0) + (target - (this.shift || 0)) * 0.12;
+      if (Math.abs(this.shift) < 0.5) this.shift = 0;
+      if (this.shift) this.camera.setViewOffset(innerWidth, innerHeight, this.shift, 0, innerWidth, innerHeight);
+      else this.camera.clearViewOffset();
+    }
     this.renderer.render(this.scene, this.camera);
   }
 }

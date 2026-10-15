@@ -1,4 +1,6 @@
-// Keyboard + mouse on laptops; a floating joystick (left half), camera drag (right half) and pinch zoom on tablets.
+// Keyboard + mouse on laptops; a floating joystick (left side), camera drag (right side) and pinch zoom on tablets.
+// Every finger is tracked on its own: you can walk with the joystick, turn the camera and press buttons at once.
+// A pinch needs two camera fingers; the joystick finger never counts toward it.
 export class Input {
   constructor(canvas, ui) {
     this.canvas = canvas;
@@ -93,13 +95,10 @@ export class Input {
   onDown(e) {
     if (!this.enabled) return;
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), type: e.pointerType });
-    if (this.pointers.size === 2 && e.pointerType === 'touch') {
-      const [a, b] = [...this.pointers.values()];
-      this.pinch = Math.hypot(a.x - b.x, a.y - b.y);
-      this.joy.id = null;
-      this.camPointer = null;
-      this.joyEl.classList.remove('on');
-      return;
+    try {
+      this.canvas.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
     }
     if (e.pointerType === 'touch' && e.clientX < innerWidth * 0.45 && this.joy.id === null) {
       this.joy = { id: e.pointerId, ox: e.clientX, oy: e.clientY, x: 0, y: 0 };
@@ -108,12 +107,19 @@ export class Input {
       this.joyEl.classList.add('on');
       return;
     }
-    this.camPointer = e.pointerId;
-    try {
-      this.canvas.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
+    const cams = this.camFingers();
+    if (e.pointerType === 'touch' && cams.length === 2) {
+      // second camera finger: pinch zoom (the joystick keeps working)
+      this.pinch = Math.hypot(cams[0].x - cams[1].x, cams[0].y - cams[1].y);
+      this.camPointer = null;
+      return;
     }
+    this.camPointer = e.pointerId;
+  }
+
+  // touches that are not steering the joystick
+  camFingers() {
+    return [...this.pointers.entries()].filter(([id, p]) => id !== this.joy.id && p.type === 'touch').map(([, p]) => p);
   }
 
   onMove(e) {
@@ -122,13 +128,6 @@ export class Input {
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX;
     p.y = e.clientY;
-    if (this.pinch !== null && this.pointers.size === 2) {
-      const [a, b] = [...this.pointers.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      this.zoom -= (d - this.pinch) * 0.04;
-      this.pinch = d;
-      return;
-    }
     if (e.pointerId === this.joy.id) {
       const max = 55;
       let jx = e.clientX - this.joy.ox, jy = e.clientY - this.joy.oy;
@@ -142,6 +141,15 @@ export class Input {
       this.joyEl.firstChild.style.transform = `translate(${jx}px, ${jy}px)`;
       return;
     }
+    if (this.pinch !== null && e.pointerId !== this.joy.id) {
+      const cams = this.camFingers();
+      if (cams.length === 2) {
+        const d = Math.hypot(cams[0].x - cams[1].x, cams[0].y - cams[1].y);
+        this.zoom -= (d - this.pinch) * 0.04;
+        this.pinch = d;
+      }
+      return;
+    }
     if (e.pointerId === this.camPointer) {
       const sens = e.pointerType === 'touch' ? 0.0075 : 0.0055;
       this.camDX += dx * sens;
@@ -152,7 +160,12 @@ export class Input {
   onUp(e) {
     const p = this.pointers.get(e.pointerId);
     this.pointers.delete(e.pointerId);
-    if (this.pointers.size < 2) this.pinch = null;
+    if (this.pinch !== null && this.camFingers().length < 2) {
+      this.pinch = null;
+      // the finger still down goes back to turning the camera
+      const rest = [...this.pointers.keys()].find((id) => id !== this.joy.id);
+      this.camPointer = rest ?? null;
+    }
     if (e.pointerId === this.joy.id) {
       this.joy = { id: null, x: 0, y: 0 };
       this.joyEl.classList.remove('on');

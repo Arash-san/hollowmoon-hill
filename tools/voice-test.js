@@ -39,9 +39,12 @@ try {
     const talk = g.ui.handlers.talk;
     g.ui.handlers.talk = (n, text) => ((window.__said = text), talk(n, text));
     const onNpc = g.onNpc.bind(g);
-    g.onNpc = (m) => ((window.__reply = m.say), onNpc(m));
-    const qv = g.queueVoice.bind(g);
-    g.queueVoice = (m) => ((window.__clips ||= []).push({ ...m, at: Date.now() }), qv(m));
+    g.onNpc = (m) => (!m.greet && (window.__reply = m.say), onNpc(m));
+    // the reply streams in as numbered lines and voice clips; the bubble shows each line while its clip plays
+    window.__speechLog = [];
+    const sl = g.speech.line.bind(g.speech), sv = g.speech.voice.bind(g.speech);
+    g.speech.line = (m) => ((window.__lines ||= []).push({ ...m, at: Date.now() }), sl(m));
+    g.speech.voice = (m) => ((window.__clips ||= []).push({ ...m, at: Date.now() }), sv(m));
   });
   await page.waitForSelector('#dialog .mic', { visible: true, timeout: 5000 });
   const box = await (await page.$('#dialog .mic')).boundingBox();
@@ -64,6 +67,19 @@ try {
   console.log(clip ? `first voice clip ${clip.audio} after ${clip.at - t0} ms` : 'no voice clip');
   if (!clip) ok = false;
   console.log(`${npc} replied after ${Date.now() - t0} ms: "${reply}"`);
+  const first = await page.evaluate(() => window.__lines?.[0]);
+  if (first) console.log(`first line streamed after ${first.at - t0} ms: "${first.text}"`);
+  // wait until the whole reply has been spoken, then check that text and voice stayed in step
+  await page.waitForFunction(() => !window.__game.speech.r, { timeout: 40000 }).catch(() => {});
+  const log = await page.evaluate(() => window.__speechLog.filter((e) => e.rid === window.__lines?.[0]?.rid));
+  const shows = log.filter((e) => e.ev === 'show');
+  console.log('speech:', log.map((e) => `${e.ev}${e.i}${e.voiced === false ? '(silent)' : ''}+${e.at - t0}`).join(' '));
+  for (const s of shows.slice(1)) {
+    const prevEnd = log.find((e) => e.ev === 'end' && e.i === s.i - 1);
+    if (prevEnd && s.at < prevEnd.at) (ok = false), console.log(`line ${s.i} shown before line ${s.i - 1} finished speaking`);
+  }
+  if (!shows.length || shows.some((s, k) => s.i !== k)) (ok = false), console.log('lines shown out of order or not at all');
+  if (shows.some((s) => !s.voiced)) console.log('note: some lines had no voice in time');
   await sleep(600);
   await page.screenshot({ path: '.tmp/voice-dialog.png' });
   if (!/borrow/i.test(said)) ok = false;

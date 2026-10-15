@@ -95,7 +95,9 @@ kbd { background: #3a2060; border: 2px solid var(--ink); border-radius: 7px; pad
 .fine { font-size: 14px; color: var(--muted); margin: 16px 0 0; line-height: 1.45; }
 
 /* ===================================================================== HUD */
-#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; zoom: var(--ui, 1); }
+/* the dialog and pop-ups shrink less than the HUD so their text stays easy to read */
+#dialog, .modal-card { zoom: max(var(--ui, 1), 0.9); }
 #hud > * { pointer-events: auto; }
 #me-card { position: absolute; left: calc(12px + var(--safe-l)); top: 12px; display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 5px 12px; align-items: center; padding: 9px 14px 10px 9px; max-width: 340px; }
 .face-ring { grid-row: span 2; position: relative; width: 66px; height: 66px; border-radius: 50%; padding: 3px; background: conic-gradient(var(--orange), var(--gold), var(--pink), var(--purple), var(--orange)); box-shadow: 0 0 0 3px var(--ink); }
@@ -124,11 +126,11 @@ kbd { background: #3a2060; border: 2px solid var(--ink); border-radius: 7px; pad
 #minimap:active { transform: translateY(2px); }
 body.talking #minimap { display: none; }
 
-#booth-banner { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 8px; font-weight: 600; font-size: 15px; max-width: min(56vw, 640px); background: linear-gradient(180deg, #ff9cc2, #ff4f8b); color: #2a0414; cursor: pointer; }
-#booth-banner .ic { width: 36px; height: 36px; }
+#booth-banner { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 7px; font-weight: 600; font-size: 14px; line-height: 1.2; max-width: min(52vw, 560px); background: linear-gradient(180deg, #ff9cc2, #ff4f8b); color: #2a0414; cursor: pointer; }
+#booth-banner .ic { width: 30px; height: 30px; }
 #booth-banner u { text-decoration-thickness: 2px; }
 #booth-banner .code { white-space: nowrap; background: rgba(42, 4, 20, 0.15); border-radius: 12px; padding: 2px 4px 2px 10px; }
-#booth-banner .code b { font-size: 20px; letter-spacing: 3px; background: var(--cream); padding: 0 8px; border-radius: 8px; margin-left: 4px; }
+#booth-banner .code b { font-size: 17px; letter-spacing: 3px; background: var(--cream); padding: 0 8px; border-radius: 8px; margin-left: 4px; }
 
 /* ===================================================================== checklist */
 #quest-panel { position: absolute; left: calc(12px + var(--safe-l)); top: 132px; width: 310px; padding: 10px; max-height: calc(100vh - 330px); overflow: auto; font-size: 14px; }
@@ -175,7 +177,7 @@ body.talking #minimap { display: none; }
 .ticket-meter.full { justify-content: center; }
 
 /* rooms and contests */
-#top-center { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: min(640px, 90vw); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none !important; }
+#top-center { position: absolute; left: 50%; top: 66px; transform: translateX(-50%); width: min(520px, 62vw); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none !important; }
 #top-center > * { pointer-events: auto; }
 #room-panel, #contest-panel { padding: 12px 16px; min-width: 300px; max-width: 100%; text-align: center; }
 #room-panel h4, #contest-panel h4 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -213,7 +215,9 @@ body.talking #minimap { display: none; }
 #compass { position: absolute; left: 50%; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%); display: flex; align-items: center; gap: 9px; background: rgba(18, 9, 34, 0.82); border: 2px solid var(--ink); border-radius: 999px; padding: 4px 16px 4px 5px; font-weight: 600; font-size: 15px; pointer-events: none !important; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--rim); }
 #compass .arrow { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(180deg, #ffb35c, #ff7a1a); color: var(--ink); border: 2px solid var(--ink); transition: transform 0.15s; }
 #compass .arrow svg { width: 18px; height: 18px; }
-body:not(.desktop) #compass { bottom: auto; top: 112px; }
+/* touch: the compass sits right under the top banner and the toasts start below it */
+body:not(.desktop) #compass { bottom: auto; top: 60px; }
+body:not(.desktop) #top-center { top: 102px; }
 
 /* ===================================================================== chat */
 #chat-log { position: absolute; left: calc(12px + var(--safe-l)); bottom: calc(14px + var(--safe-b)); width: min(390px, 44vw); display: flex; flex-direction: column; gap: 4px; pointer-events: none !important; }
@@ -261,14 +265,14 @@ body.desktop .act.big .ic { width: 42px; height: 42px; }
 
 /* ===================================================================== toasts + banner */
 #toasts { display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none !important; width: 100%; }
-.toast { display: flex; align-items: center; gap: 10px; padding: 7px 16px 7px 8px; font-weight: 600; animation: toast 5s forwards; text-align: left; border-radius: 18px; max-width: 100%; }
-.toast .ti { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; background: rgba(18, 9, 34, 0.35); }
-.toast .ti .ic { width: 30px; height: 30px; }
+.toast { display: flex; align-items: center; gap: 8px; padding: 4px 13px 4px 5px; font-weight: 600; font-size: 14px; line-height: 1.25; animation: toast 5s forwards; text-align: left; border-radius: 15px; border-width: 2px; max-width: 100%; }
+.toast .ti { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 12px; background: rgba(18, 9, 34, 0.35); }
+.toast .ti .ic { width: 24px; height: 24px; }
 .toast.good { background: linear-gradient(180deg, #42a07c, #2a6a50); }
 .toast.boss { background: linear-gradient(180deg, #a3354a, #5a1a2a); }
 .toast.win { background: linear-gradient(180deg, #ffe27a, #ffa24a); color: #3a2000; }
 .toast.heart { background: linear-gradient(180deg, #ffa3c4, #d94f8b); }
-.toast.announce { background: linear-gradient(180deg, #4fd8cb, #1a8a80); font-size: 17px; }
+.toast.announce { background: linear-gradient(180deg, #4fd8cb, #1a8a80); font-size: 15px; }
 @keyframes toast { 0% { opacity: 0; transform: translateY(-12px) scale(0.9); } 6%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-8px); } }
 #banner { position: absolute; top: 30%; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 14px; pointer-events: none !important; font-family: Creepster, Fredoka; font-size: clamp(44px, 9vw, 96px); color: var(--gold); text-shadow: 0 5px 0 var(--ink), 0 0 40px rgba(255, 210, 63, 0.6); opacity: 0; }
 #banner .ic.bn { width: 1.1em; height: 1.1em; filter: drop-shadow(0 5px 0 var(--ink)); }
@@ -276,33 +280,43 @@ body.desktop .act.big .ic { width: 42px; height: 42px; }
 @keyframes banner { 0% { opacity: 0; transform: scale(0.4) rotate(-6deg); } 12% { opacity: 1; transform: scale(1.1) rotate(2deg); } 20%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(1.2); } }
 
 /* ===================================================================== NPC talk bar (the conversation happens in bubbles) */
-#dialog { position: fixed; left: 50%; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%); width: min(580px, 94vw); z-index: 20; border-width: 4px; border-radius: 26px; display: flex; flex-direction: column; padding: 10px 12px 12px; gap: 8px; animation: rise-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1); }
-@keyframes rise-in { from { transform: translate(-50%, 40px); opacity: 0; } }
+/* bottom right, where the action buttons were (they hide while you talk), so you and the character stay in view
+   (main.js frameDialog slides the picture left). Narrow screens get it full width at the bottom. */
+#dialog { position: fixed; right: calc(12px + var(--safe-r)); bottom: calc(12px + var(--safe-b)); width: min(390px, 42vw); z-index: 20; border-width: 3px; border-radius: 22px; display: flex; flex-direction: column; padding: 8px 10px 10px; gap: 7px; animation: rise-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes rise-in { from { transform: translateY(40px); opacity: 0; } }
 #dialog header { display: flex; align-items: center; gap: 10px; }
-#dialog .npc-icon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; border: 2px solid var(--ink); background: radial-gradient(circle at 35% 30%, #6a46a8, #2a1846); }
-#dialog .npc-icon .ic { width: 42px; height: 42px; }
+#dialog .npc-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 16px; border: 2px solid var(--ink); background: radial-gradient(circle at 35% 30%, #6a46a8, #2a1846); }
+#dialog .npc-icon .ic { width: 34px; height: 34px; }
 #dialog header div { flex: 1; display: flex; flex-direction: column; }
-#dialog header b { font-size: 20px; }
-#dialog header small { color: var(--muted); }
+#dialog header b { font-size: 18px; line-height: 1.1; }
+#dialog header small { color: var(--muted); font-size: 12.5px; }
 .x { width: 40px; height: 40px; padding: 0; border: 0; background: none; display: grid; place-items: center; }
 .x .ic { width: 38px; height: 38px; }
 .x:hover .ic { transform: rotate(90deg); transition: transform 0.2s; }
 #dialog .talk { display: flex; gap: 10px; align-items: center; }
-#dialog .mic { flex: 1; height: 76px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 4px solid var(--ink); border-radius: 22px; background: linear-gradient(180deg, #ffb35c, #ff7a1a); color: #2a1004; box-shadow: 0 5px 0 var(--ink), inset 0 3px 0 rgba(255, 255, 255, 0.35); font: 700 22px Fredoka, sans-serif; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform 0.1s, background 0.15s; }
-#dialog .mic .ic { width: 44px; height: 44px; }
+#dialog .mic { flex: 1; height: 62px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 4px solid var(--ink); border-radius: 22px; background: linear-gradient(180deg, #ffb35c, #ff7a1a); color: #2a1004; box-shadow: 0 5px 0 var(--ink), inset 0 3px 0 rgba(255, 255, 255, 0.35); font: 700 19px Fredoka, sans-serif; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform 0.1s, background 0.15s; }
+#dialog .mic .ic { width: 34px; height: 34px; }
 #dialog .mic:active, #dialog .mic[data-state="listening"] { transform: translateY(3px); box-shadow: 0 2px 0 var(--ink); }
 #dialog .mic[data-state="listening"] { background: linear-gradient(180deg, #ff8a8a, #ff3d3d); color: #fff; animation: mic-pulse 1s ease-in-out infinite; }
 #dialog .mic[data-state="sending"] { background: linear-gradient(180deg, #ffe892, #ffd23f); cursor: progress; }
 @keyframes mic-pulse { 50% { box-shadow: 0 2px 0 var(--ink), 0 0 0 12px rgba(255, 61, 61, 0.28); } }
-#dialog .kbd { flex: none; width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; border: 3px solid var(--ink); background: linear-gradient(180deg, #57348e, #3d2466); box-shadow: 0 3px 0 var(--ink); }
-#dialog .kbd .ic { width: 36px; height: 36px; }
+#dialog .kbd { flex: none; width: 50px; height: 50px; display: grid; place-items: center; border-radius: 16px; border: 3px solid var(--ink); background: linear-gradient(180deg, #57348e, #3d2466); box-shadow: 0 3px 0 var(--ink); }
+#dialog .kbd .ic { width: 30px; height: 30px; }
 #dialog form { flex: 1; display: flex; gap: 8px; }
-#dialog .talk-hint { font-size: 13px; color: var(--muted); text-align: center; }
-#dialog .offer { background: linear-gradient(180deg, #ffe892, #ffd23f); color: #3a2a00; border: 3px solid var(--ink); border-radius: 16px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; font-weight: 600; }
+#dialog .talk-hint { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.25; }
+#dialog .offer { background: linear-gradient(180deg, #ffe892, #ffd23f); color: #3a2a00; border: 3px solid var(--ink); border-radius: 14px; padding: 6px 8px; display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: 15px; line-height: 1.2; animation: pop 0.3s cubic-bezier(0.2, 1.6, 0.4, 1); }
+#dialog .offer .btn { padding: 7px 14px; font-size: 15px; }
 #dialog .offer span { flex: 1; display: flex; align-items: center; gap: 6px; }
-#dialog .extras { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+#dialog .extras { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
+#dialog .extras .btn { padding: 6px 11px; font-size: 14px; border-radius: 13px; }
+#dialog .extras .pill { font-size: 14px; }
 #dialog .extras:empty, #dialog .chips:empty { display: none; }
-#dialog .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+/* suggestions: one row you can swipe sideways */
+#dialog .chips { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -10px; padding: 0 10px 3px; touch-action: pan-x; -webkit-mask: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 18px), transparent); mask: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 18px), transparent); }
+#dialog .chips::-webkit-scrollbar { display: none; }
+#dialog .chips button { flex: none; white-space: nowrap; font-size: 13px; padding: 5px 11px; }
+@media (max-width: 760px) { #dialog { left: calc(8px + var(--safe-l)); right: calc(8px + var(--safe-r)); width: auto; } }
+@media (max-height: 620px) { #dialog .talk-hint { display: none; } }
 body.talking #actions, body.talking #compass, body.talking #chat-log, body.talking #prompt { display: none; }
 
 /* ===================================================================== modal */

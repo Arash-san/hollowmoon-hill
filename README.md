@@ -43,7 +43,11 @@ To rebuild the client after editing: `node tools/build.js` (or `--dev`). To rest
   - This takes about 1.5 s. The result is an avatar spec (`shared/avatar.js`), and the browser builds a rigged chibi character from it. Because of that, every emote works on every face.
   - Photos are not saved.
 - **NPCs** (`server/npc.js`):
-  - Qwen3 8B (`qwen3:8b`, Q4_K_M, 8.2B parameters, thinking off) plays 7 characters. On one RTX 5090 it writes about 185 to 205 tokens a second and reads prompts at about 4,400 tokens a second, so a reply takes 0.2 to 0.4 s. `OLLAMA_NUM_PARALLEL=8` lets 8 players talk at the same moment; the rest wait in a short queue.
+  - Qwen3.8 27B (`Qwen/Qwen3.8-27B-FP8`, thinking off) plays 7 characters. It runs with vLLM on Amadeus (one H200, a ~46 GB slice next to other lab jobs) and the game reaches it over the tailnet (`data/llm.json`: url, model, key). Setup and restart scripts: `tools/amadeus/` (cron runs `ensure.sh` every 5 minutes and at boot; it only ever starts things).
+  - Replies stream: the first sentence is shown and spoken while the rest is still being written. Measured 2026-10-15 (`node tools/llm-bench.js 1 10 20 40`): one player 0.45 s for a whole reply (about 90 tokens a second with MTP speculative decoding); 10 players at the same instant 1.4 s; 20 players 2.7 s; 40 players 4.1 s median (415 tokens a second in total).
+  - Each character remembers each player: the last 20 lines of their talk plus up to 12 short notes the model chooses to keep ("loves dragons", "promised 3 pumpkins"), saved with the player. Characters also hear the latest note the others keep about you (town gossip).
+  - Actions with a reply: mark a quest on your map (`guide`), an emote, an offer or a small gift.
+  - If Amadeus is down the game falls back to the local Qwen3 8B (`qwen3:8b` on Ollama :11445, no streaming) and switches back by itself.
   - They can propose loans, discounts, item swaps and small gifts. The server clamps every offer to hard limits, and the player has to press Accept.
   - Prompt injection gets an in-character refusal at worst.
 - **Voice** (`server/voice.js`, `client/src/voice.js`):
@@ -51,7 +55,10 @@ To rebuild the client after editing: `node tools/build.js` (or `--dev`). To rest
   - The server sends the clip to Freesia Voice (`voice.inquirelab.ai`) with the game's own account `halloween-game`. Its token is in `data/freesia.json`.
   - Recordings are never kept (`contribute=0`). One clip at a time and at most 10 a minute per player, and Freesia allows 40 a minute for the whole account.
   - Browsers allow the microphone only on https or localhost, so the button is hidden on `http://yorhapc:8830`.
-- **NPC voices** (`server/tts.js`, `tts/server.py`): Kokoro 82M (kokoro-onnx on the GPU) speaks each reply sentence by sentence, so the first sentence plays while the rest is still being made. A sentence takes 0.15 to 0.35 s. Every NPC has its own voice and speed (`voice` in `shared/world.js`), and the browser shifts the pitch for the goofy ones.
+- **NPC voices** (`server/tts.js`, `tts/server.py`): Kokoro 82M (kokoro-onnx on the GPU) speaks each reply sentence by sentence, so the first sentence plays while the rest is still being made. A sentence takes 0.15 to 0.35 s; six sessions work in parallel (`TTS_WORKERS`), so 10 sentences at once take 0.84 s median and 40 at once under 5 s (`node tools/tts-bench.js 1 10 40`). Every NPC has its own voice and speed (`voice` in `shared/world.js`), and the browser shifts the pitch for the goofy ones.
+- **Text and voice in step** (`client/src/speech.js`): each sentence arrives as a numbered line plus a voice clip with the same number. The bubble shows a sentence exactly while its clip plays, then the next; with the sound off a line stays up for its reading time. A new reply, or you speaking, cuts the old one off.
+- **Speech to text for 40 players:** the Freesia gateway lets the `halloween-game` account send 600 clips a minute (`ASR_RATE_OVERRIDES` in Freesia's docker-compose; other accounts keep 40). 40 clips at the same instant take 3.3 s median (`node tools/stt-bench.js 1 10 40`).
+- **Tablets:** the HUD scales with the screen (`--ui`, CSS zoom), the NPC dialog sits at the bottom right and the picture slides left so you and the character stay in view, and each finger is tracked on its own (walk, turn the camera and press buttons at the same time). Spiders leave you alone near a character and for 20 s after you talk.
 - **Icons** (`client/src/icons.js`): the whole UI uses one set of drawn SVG icons instead of emoji. `richText()` and `iconize()` swap any emoji in server text for the matching icon.
 - **Client** (`client/src/`): three.js with toon shading and outlines. Everything is built in code: the characters, the world props, the music and the sound effects. There are no asset files.
 
@@ -107,7 +114,7 @@ The code is at https://github.com/Arash-san/hollowmoon-hill. Work on a branch an
 - `node tools/play.js <npc|pumpkins|wisps|potion|carve|boss|map|tablet|dance|ritual>` takes screenshots of the real client.
 - `node tools/bots.js <n> <wander|ritual|dance|boss> <secs>` runs fake players.
 - `node tools/booth-test.js <photo.jpg>` runs the booth end to end.
-- `node tools/voice-test.js [clip.wav] [npc]` talks to an NPC through Chrome's fake microphone. `node tools/keys-test.js` checks keyboard login and movement. Add `HH_COOKIE_FILE=<portal session token file>` (and `BASE=` for the voice test) to run either one through the portal.
+- `node tools/voice-test.js [clip.wav] [npc]` talks to an NPC through Chrome's fake microphone and checks that each sentence shows while its voice plays. `BASE=... node tools/npc-memory-test.js` checks memory across a reload, town gossip, map marking and that lines are not repeated. `node tools/tablet-shots.js <prefix> [WxH]` screenshots the HUD and a dialog at tablet size. `node tools/keys-test.js` checks keyboard login and movement. Add `HH_COOKIE_FILE=<portal session token file>` (and `BASE=` for the voice test) to run either one through the portal.
 - `BASE=http://127.0.0.1:8831/ HH_ADMIN=<admin key> node tools/v3-test.js` plays two players through classes, a duel, Gloom Manor, the Pumpkin Bear, the lantern and the contest.
 - `gallery.html` shows a lineup of avatars, and `gallery.html?world=1&cam=x,y,z&at=x,z` shows the world.
 

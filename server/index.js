@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws';
 import { Game } from './game.js';
 import { keys, DATA } from './store.js';
 import { designAvatar, VISION_MODEL } from './avatarAgent.js';
-import { CHAT_MODEL } from './npc.js';
+import { CHAT_MODEL, chatModel } from './npc.js';
 import { randomAvatar } from '../shared/avatar.js';
 import { transcribe, voiceEnabled } from './voice.js';
 import { PHOTO_BOOTH, dist2 } from '../shared/world.js';
@@ -210,7 +210,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': buf.length, 'cache-control': 'private, max-age=300' });
       return res.end(buf);
     }
-    if (p === '/api/health') return sendJson(res, 200, { ok: true, online: game.online().length, vision: VISION_MODEL, chat: CHAT_MODEL, voice: voiceEnabled(), tts: ttsEnabled() });
+    if (p === '/api/health') return sendJson(res, 200, { ok: true, online: game.online().length, vision: VISION_MODEL, chat: chatModel(), voice: voiceEnabled(), tts: ttsEnabled() });
     if (p.startsWith('/carvings/')) {
       const id = Number(p.slice(10).replace('.png', ''));
       return serveFile(res, path.join(DATA, 'carvings', `${id}.png`), 'no-cache');

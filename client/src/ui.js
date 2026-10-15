@@ -30,6 +30,11 @@ export class UI {
     this.questsOpen = localStorage.getItem('hh-quests') === 'open';
     hydrateIcons();
     if (!matchMedia('(pointer: coarse)').matches) document.body.classList.add('desktop');
+    // The HUD is drawn for a big laptop screen and scaled down (CSS zoom: var(--ui)) on smaller ones, so a tablet
+    // keeps more of the game visible; touch targets stay at least ~44 px.
+    const fit = () => document.documentElement.style.setProperty('--ui', Math.max(0.72, Math.min(1, innerWidth / 1500, innerHeight / 980)).toFixed(3));
+    fit();
+    addEventListener('resize', fit);
     $('#modal .x').onclick = () => this.closeModal();
     $('#modal').addEventListener('pointerdown', (e) => {
       if (e.target.id === 'modal') this.closeModal();
@@ -243,7 +248,7 @@ export class UI {
     el.innerHTML = `<span class="ti">${icon(lead)}</span><span class="tt">${richText(rest)}</span>`;
     const box = $('#toasts');
     box.appendChild(el);
-    while (box.children.length > 4) box.firstChild.remove();
+    while (box.children.length > 3) box.firstChild.remove();
     setTimeout(() => el.remove(), 5100);
   }
 

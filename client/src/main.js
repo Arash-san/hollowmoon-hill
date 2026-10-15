@@ -20,6 +20,7 @@ import { MiniMap } from './minimap.js';
 import { icon, preloadIcons } from './icons.js';
 import { photoBoothModal } from './photobooth.js';
 import { Spiders } from './spiders.js';
+import { Speech } from './speech.js';
 import { CLUES } from '../../shared/story.js';
 import * as F from './features.js';
 import { MANOR_DOOR, ROOM_EXIT, CLASSES } from '../../shared/features.js';
@@ -67,6 +68,7 @@ class Game {
     this.hp = 100;
     this.downUntil = 0;
     this.input = new Input(this.stage.renderer.domElement, this.ui);
+    addEventListener('resize', () => this.frameDialog());
     this.others = new Map();
     this.npcs = new Map();
     this.partyUntil = 0;
@@ -77,6 +79,8 @@ class Game {
     this.buildNpcs();
     this.minimap = new MiniMap(this, document.getElementById('minimap'));
     this.tracked = localStorage.getItem('hh-track') || '';
+    this.speech = new Speech(this);
+    this.npcPitch = NPC_PITCH;
     this.ui.tracked = this.tracked;
     this.bindUi();
     this.t0 = performance.now();
@@ -121,10 +125,7 @@ class Game {
       this.npcs.get(npc)?.say('…', 30, true);
       this.net.send({ t: 'talk', npc, text });
     });
-    ui.on('npcSays', (npc, text) => {
-      this.npcs.get(npc)?.speak(text);
-      this.net?.send({ t: 'greet', npc });
-    });
+    ui.on('npcSays', (npc) => this.net?.send({ t: 'greet', npc })); // the greeting comes back as synced lines
     ui.on('accept', () => this.net.send({ t: 'accept' }));
     ui.on('repay', () => this.net.send({ t: 'repay' }));
     ui.on('buyTicket', () => this.net.send({ t: 'buyTicket' }));
@@ -134,6 +135,7 @@ class Game {
     ui.on('listening', () => this.stopVoice());
     ui.on('dialogClosed', () => {
       this.stopVoice();
+      this.stage.setShift(0);
       const npc = this.npcs.get(this.talkingTo);
       if (npc) npc.talkTarget = null;
       this.talkingTo = null;
@@ -235,7 +237,9 @@ class Game {
       if (m.by === this.myId) this.audio.play('wisp');
     });
     n.on('npc', (m) => this.onNpc(m));
-    n.on('npcVoice', (m) => this.queueVoice(m));
+    n.on('npcLine', (m) => this.speech.line(m));
+    n.on('npcVoice', (m) => this.speech.voice(m));
+    n.on('npcEmote', (m) => this.npcs.get(m.npc)?.emote(m.e));
     n.on('candy', (m) => this.onCandy(m));
     n.on('quest', (m) => this.onQuest(m));
     n.on('ticket', (m) => this.onTicket(m));
@@ -508,49 +512,20 @@ class Game {
     this.fx.sparkle(this.me.pos.clone().setY(this.me.pos.y + 1.5), '#ffd23f', 30, 2);
   }
 
-  // NPC voices: sentence clips arrive one by one and play in order (a new reply cuts off the old one).
-  queueVoice(m) {
-    if (!this.audio.on) return;
-    if (m.i === 0) this.stopVoice();
-    const a = new window.Audio(`api/tts/${m.audio}.wav`);
-    a.preservesPitch = false; // the playback rate also shifts the pitch: deeper Count, squeakier Bones
-    a.playbackRate = m.rate || 1;
-    a.preload = 'auto';
-    (this.voiceQueue ||= []).push({ a, npc: m.npc });
-    if (!this.voiceNow) this.playNextVoice();
-  }
-
-  playNextVoice() {
-    const next = this.voiceQueue?.shift();
-    this.voiceNow = next || null;
-    if (!next) return;
-    const npc = this.npcs.get(next.npc);
-    next.a.onended = next.a.onerror = () => {
-      if (npc) npc.talking = 0;
-      this.playNextVoice();
-    };
-    next.a.onplaying = () => {
-      if (npc) npc.talking = performance.now() + (next.a.duration / (next.a.playbackRate || 1)) * 1000;
-    };
-    next.a.play().catch(() => this.playNextVoice());
-  }
-
   stopVoice() {
-    this.voiceNow?.a.pause();
-    this.voiceNow = null;
-    this.voiceQueue = [];
+    this.speech.stop();
   }
 
+  // The whole reply is in (its lines and voice arrive separately, see speech.js): offer, map guidance.
   onNpc(m) {
-    const npc = this.npcs.get(m.npc);
-    if (npc) {
-      // the reply is a speech bubble over their head (paged if it is long); my own line makes room for it
-      if (this.ui.dialogNpc === m.npc) this.me?.hideBubble();
-      npc.speak(m.say);
-      npc.talking = performance.now() + Math.min(5000, 900 + m.say.length * 45);
-      this.audio.play('babble', { pitch: NPC_PITCH[m.npc], len: m.say.length });
-    }
+    this.speech.done(m);
+    if (m.greet) return;
     if (this.ui.dialogNpc === m.npc) this.ui.showOffer(m.offer, this.state.candy);
+    if (m.guide && m.guide !== this.tracked) {
+      this.track(m.guide);
+      const q = QUESTS.find((x) => x.id === m.guide);
+      if (q) this.ui.toast(`${NPCS[m.npc].name} marked "${q.title}" on your map`, 'info');
+    }
   }
 
   onBoss(m) {
@@ -806,10 +781,23 @@ class Game {
     if (best) best.act();
   }
 
+  // The NPC dialog sits at the bottom right on wide screens: slide the picture left so you and the character stay
+  // in view beside it instead of under it.
+  frameDialog() {
+    requestAnimationFrame(() => {
+      const d = document.getElementById('dialog');
+      if (!this.ui.dialogNpc || !d) return;
+      const r = d.getBoundingClientRect();
+      const side = innerWidth > 760 && r.left > innerWidth * 0.35;
+      this.stage.setShift(side ? (innerWidth - r.left) / 2 : 0);
+    });
+  }
+
   openNpc(id) {
     this.ui.closeEmotes();
     this.ui.openDialog(id, this.state);
     this.talkingTo = id;
+    this.frameDialog();
     const npc = this.npcs.get(id);
     npc.talkTarget = this.me;
     // turn the camera so you look at them over your shoulder, and face them
